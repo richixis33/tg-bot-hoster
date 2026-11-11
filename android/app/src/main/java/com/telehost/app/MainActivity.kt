@@ -1,471 +1,385 @@
 package com.telehost.app
 
-import android.annotation.SuppressLint
 import android.content.Context
-import android.content.SharedPreferences
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.util.Log
-import android.webkit.JavascriptInterface
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import android.view.LayoutInflater
+import android.view.View
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.Toast
-import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.webkit.WebViewAssetLoader
-import org.json.JSONArray
-import org.json.JSONObject
-import java.io.ByteArrayInputStream
+import androidx.recyclerview.widget.LinearLayoutManager
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.telehost.app.databinding.ActivityMainBinding
+import com.telehost.app.databinding.DialogAddBotBinding
 import java.io.File
-import java.nio.charset.StandardCharsets
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var webView: WebView
-    private lateinit var prefs: SharedPreferences
-    private val TAG = "TeleHostMainActivity"
+    private lateinit var binding: ActivityMainBinding
+    private lateinit var botManager: BotManager
+    private lateinit var botAdapter: BotAdapter
+    private lateinit var pipAdapter: PipAdapter
 
-    @SuppressLint("SetJavaScriptEnabled")
+    private var selectedConsoleBotId: String? = null
+    private var currentEditorFile: File? = null
+
+    private val pipPackages = mutableListOf(
+        PipPackage("aiogram", "3.15.0", true),
+        PipPackage("python-telegram-bot", "21.9", true),
+        PipPackage("telebot", "4.25.0", true),
+        PipPackage("requests", "2.32.3", true),
+        PipPackage("aiohttp", "3.11.10", true),
+        PipPackage("pydantic", "2.10.3", true),
+        PipPackage("python-dotenv", "1.0.1", true)
+    )
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Prevent crashes from killing the activity silently
-        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-            Log.e(TAG, "Uncaught exception in thread ${thread.name}: ${throwable.message}", throwable)
+        // Android 15 & 16 Edge-to-Edge support
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        // Apply insets to prevent status/navigation bar clipping
+        ViewCompat.setOnApplyWindowInsetsListener(binding.rootCoordinator) { _, insets ->
+            val statusBar = insets.getInsets(WindowInsetsCompat.Type.statusBars())
+            val navBar = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+            binding.appBarLayout.setPadding(0, statusBar.top, 0, 0)
+            binding.bottomNav.setPadding(0, 0, 0, navBar.bottom)
+            insets
         }
 
-        try {
-            // Android 15 & 16 Edge-to-Edge support
-            WindowCompat.setDecorFitsSystemWindows(window, false)
+        botManager = BotManager(this)
 
-            prefs = getSharedPreferences("telehost_prefs", Context.MODE_PRIVATE)
-            initDefaultBotsIfNeeded()
+        initBotsTab()
+        initConsoleTab()
+        initPipTab()
+        initEditorTab()
+        initSettingsTab()
+        initBottomNavigation()
 
-            webView = WebView(this)
-            setContentView(webView)
-
-            ViewCompat.setOnApplyWindowInsetsListener(webView) { view, insets ->
-                val statusBar = insets.getInsets(WindowInsetsCompat.Type.statusBars())
-                val navBar = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
-                view.setPadding(0, statusBar.top, 0, navBar.bottom)
-                insets
+        // Event callbacks
+        botManager.onBotStatusChanged = {
+            runOnUiThread {
+                refreshBotsData()
             }
-
-            val settings: WebSettings = webView.settings
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            settings.databaseEnabled = true
-            settings.useWideViewPort = true
-            settings.loadWithOverviewMode = true
-            settings.allowFileAccess = true
-            settings.allowContentAccess = true
-
-            // Setup WebViewAssetLoader for safe HTTPS origin loading
-            val assetLoader = WebViewAssetLoader.Builder()
-                .setDomain("appassets.androidplatform.net")
-                .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
-                .build()
-
-            // Register JavaScript interface bridge
-            webView.addJavascriptInterface(TeleHostBridge(this), "TeleHostBridge")
-
-            webView.webViewClient = object : WebViewClient() {
-                override fun shouldInterceptRequest(
-                    view: WebView?,
-                    request: WebResourceRequest?
-                ): WebResourceResponse? {
-                    val uri = request?.url ?: return null
-
-                    // Intercept /api/ calls directly if requested via fetch
-                    if (uri.path?.startsWith("/api/") == true) {
-                        return handleApiFallback(uri)
-                    }
-
-                    return assetLoader.shouldInterceptRequest(uri)
-                }
-
-                override fun onPageFinished(view: WebView?, url: String?) {
-                    super.onPageFinished(view, url)
-                    // Inject fetch bridge so all JavaScript fetch('/api/...') routes to TeleHostBridge
-                    val hookJs = """
-                        (function() {
-                            if (window.__telehostHooked) return;
-                            window.__telehostHooked = true;
-                            const originalFetch = window.fetch;
-                            window.fetch = async function(url, options) {
-                                if (typeof url === 'string' && url.startsWith('/api/')) {
-                                    try {
-                                        const method = (options && options.method) ? options.method : 'GET';
-                                        let bodyStr = '';
-                                        if (options && options.body) {
-                                            bodyStr = typeof options.body === 'string' ? options.body : JSON.stringify(options.body);
-                                        }
-                                        if (window.TeleHostBridge && window.TeleHostBridge.callApi) {
-                                            const resText = window.TeleHostBridge.callApi(url, method, bodyStr);
-                                            return new Response(resText, {
-                                                status: 200,
-                                                headers: { 'Content-Type': 'application/json' }
-                                            });
-                                        }
-                                    } catch (err) {
-                                        console.error('TeleHostBridge fetch error:', err);
-                                    }
-                                }
-                                return originalFetch(url, options);
-                            };
-                        })();
-                    """.trimIndent()
-                    view?.evaluateJavascript(hookJs, null)
-                }
-            }
-
-            webView.webChromeClient = WebChromeClient()
-
-            // Load app through WebViewAssetLoader
-            webView.loadUrl("https://appassets.androidplatform.net/assets/web/index.html")
-
-            // Modern Android back navigation
-            onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-                override fun handleOnBackPressed() {
-                    if (::webView.isInitialized && webView.canGoBack()) {
-                        webView.goBack()
-                    } else {
-                        isEnabled = false
-                        onBackPressedDispatcher.onBackPressed()
-                    }
-                }
-            })
-
-        } catch (e: Throwable) {
-            Log.e(TAG, "Fatal error initializing MainActivity", e)
         }
-    }
 
-    private fun initDefaultBotsIfNeeded() {
-        val existing = prefs.getString("telehost_bots", null)
-        if (existing.isNullOrBlank() || existing == "[]") {
-            try {
-                val sampleArray = JSONArray()
-                val sampleBot = JSONObject().apply {
-                    put("id", "bot_sample_1")
-                    put("name", "Telegram Business Bot (Пример)")
-                    put("working_dir", File(filesDir, "bots/telegram_business_bot").absolutePath)
-                    put("command", "python bot.py")
-                    put("auto_restart", true)
-                    put("status", "stopped")
-                    put("pid", JSONObject.NULL)
-                    put("started_at", JSONObject.NULL)
-                    val logsArr = JSONArray()
-                    logsArr.put("[${currentTimeStr()}] [SYSTEM] TeleHost Material 3 инициализирован на Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
-                    logsArr.put("[${currentTimeStr()}] [SYSTEM] Пример Telegram бота готов к настройке и запуску")
-                    put("logs", logsArr)
+        botManager.onLogsUpdated = { botId ->
+            runOnUiThread {
+                if (botId == selectedConsoleBotId) {
+                    updateConsoleOutput()
                 }
-                sampleArray.put(sampleBot)
-                prefs.edit().putString("telehost_bots", sampleArray.toString()).apply()
-            } catch (e: Exception) {
-                Log.e(TAG, "Error initializing default bots", e)
             }
         }
     }
 
-    private fun handleApiFallback(uri: Uri): WebResourceResponse {
-        val path = uri.path ?: ""
-        val json = handleApiDirect(path, "GET", "")
-        val stream = ByteArrayInputStream(json.toByteArray(StandardCharsets.UTF_8))
-        return WebResourceResponse("application/json", "utf-8", stream)
+    private fun initBottomNavigation() {
+        binding.bottomNav.setOnItemSelectedListener { item ->
+            when (item.itemId) {
+                R.id.nav_bots -> switchPane(binding.paneBots)
+                R.id.nav_console -> {
+                    switchPane(binding.paneConsole)
+                    setupConsoleSpinner()
+                    updateConsoleOutput()
+                }
+                R.id.nav_pip -> switchPane(binding.panePip)
+                R.id.nav_editor -> {
+                    switchPane(binding.paneEditor)
+                    setupEditorFilesSpinner()
+                }
+                R.id.nav_settings -> switchPane(binding.paneSettings)
+            }
+            true
+        }
     }
 
-    fun handleApiDirect(path: String, method: String, body: String): String {
-        try {
-            when {
-                path == "/api/system" -> {
-                    val root = JSONObject().apply {
-                        put("os", "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
-                        put("python_version", "Python 3.11 (TeleHost Engine)")
-                        put("python_cmd", "python3")
-                        put("arch", Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a")
-                        put("device", "${Build.MANUFACTURER} ${Build.MODEL}")
+    private fun switchPane(visiblePane: View) {
+        binding.paneBots.visibility = View.GONE
+        binding.paneConsole.visibility = View.GONE
+        binding.panePip.visibility = View.GONE
+        binding.paneEditor.visibility = View.GONE
+        binding.paneSettings.visibility = View.GONE
+
+        visiblePane.visibility = View.VISIBLE
+    }
+
+    /* ==========================================================================
+       1. BOTS TAB
+       ========================================================================== */
+
+    private fun initBotsTab() {
+        val bots = botManager.getBots()
+        botAdapter = BotAdapter(
+            bots = bots,
+            onToggle = { bot ->
+                if (bot.status == "running") {
+                    botManager.stopBot(bot.id)
+                    Toast.makeText(this, "Бот остановлен", Toast.LENGTH_SHORT).show()
+                } else {
+                    botManager.startBot(bot.id)
+                    Toast.makeText(this, "Бот запущен", Toast.LENGTH_SHORT).show()
+                }
+            },
+            onLogs = { bot ->
+                selectedConsoleBotId = bot.id
+                binding.bottomNav.selectedItemId = R.id.nav_console
+            },
+            onEdit = { bot ->
+                binding.bottomNav.selectedItemId = R.id.nav_editor
+            },
+            onDelete = { bot ->
+                MaterialAlertDialogBuilder(this)
+                    .setTitle("Удалить бота?")
+                    .setMessage("Вы уверены, что хотите удалить конфигурацию '${bot.name}'?")
+                    .setPositiveButton("Удалить") { _, _ ->
+                        botManager.deleteBot(bot.id)
+                        refreshBotsData()
+                        Toast.makeText(this, "Бот удален", Toast.LENGTH_SHORT).show()
                     }
-                    return root.toString()
+                    .setNegativeButton("Отмена", null)
+                    .show()
+            }
+        )
+
+        binding.rvBots.layoutManager = LinearLayoutManager(this)
+        binding.rvBots.adapter = botAdapter
+
+        binding.fabAddBot.setOnClickListener {
+            showAddBotDialog()
+        }
+
+        updateStats()
+    }
+
+    private fun refreshBotsData() {
+        val bots = botManager.getBots()
+        botAdapter.updateList(bots)
+        updateStats()
+    }
+
+    private fun updateStats() {
+        val bots = botManager.getBots()
+        val total = bots.size
+        val running = bots.count { it.status == "running" }
+
+        binding.tvStatTotalBots.text = total.toString()
+        binding.tvStatRunningBots.text = running.toString()
+    }
+
+    private fun showAddBotDialog() {
+        val dialogBinding = DialogAddBotBinding.inflate(LayoutInflater.from(this))
+        val defaultDir = File(filesDir, "bots/bot_${System.currentTimeMillis() % 10000}").absolutePath
+        dialogBinding.etBotDir.setText(defaultDir)
+
+        MaterialAlertDialogBuilder(this)
+            .setView(dialogBinding.root)
+            .setPositiveButton("Создать") { _, _ ->
+                val name = dialogBinding.etBotName.text.toString().trim()
+                val dir = dialogBinding.etBotDir.text.toString().trim()
+                val cmd = dialogBinding.etBotCommand.text.toString().trim()
+                val autoRestart = dialogBinding.switchAutoRestart.isChecked
+
+                botManager.addBot(name, dir, cmd, autoRestart)
+                refreshBotsData()
+                Toast.makeText(this, "Бот '$name' добавлен!", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
+    /* ==========================================================================
+       2. CONSOLE TAB
+       ========================================================================== */
+
+    private fun initConsoleTab() {
+        binding.btnClearLogs.setOnClickListener {
+            selectedConsoleBotId?.let { id ->
+                botManager.clearLogs(id)
+                updateConsoleOutput()
+                Toast.makeText(this, "Логи очищены", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        binding.btnConsoleSend.setOnClickListener {
+            val cmd = binding.etConsoleCommand.text.toString().trim()
+            if (cmd.isNotBlank()) {
+                selectedConsoleBotId?.let { id ->
+                    botManager.appendLog(id, "[SYSTEM] Команда: $cmd")
+                    botManager.appendLog(id, "[STDOUT] TeleHost: Выполнение команды в изолированном окружении...")
                 }
+                binding.etConsoleCommand.text?.clear()
+            }
+        }
+    }
 
-                path == "/api/bots" && method == "GET" -> {
-                    return prefs.getString("telehost_bots", "[]") ?: "[]"
-                }
+    private fun setupConsoleSpinner() {
+        val bots = botManager.getBots()
+        val names = bots.map { it.name }
 
-                path == "/api/bots/add" && method == "POST" -> {
-                    val bodyObj = JSONObject(if (body.isBlank()) "{}" else body)
-                    val name = bodyObj.optString("name", "Новый бот")
-                    val workingDir = bodyObj.optString("working_dir", filesDir.absolutePath)
-                    val command = bodyObj.optString("command", "python bot.py")
-                    val autoRestart = bodyObj.optBoolean("auto_restart", true)
+        val spinnerAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, names)
+        binding.spinnerConsoleBot.adapter = spinnerAdapter
 
-                    val botsArr = JSONArray(prefs.getString("telehost_bots", "[]") ?: "[]")
-                    val newId = "bot_${System.currentTimeMillis() % 100000}"
+        if (selectedConsoleBotId != null) {
+            val index = bots.indexOfFirst { it.id == selectedConsoleBotId }
+            if (index != -1) {
+                binding.spinnerConsoleBot.setSelection(index)
+            }
+        } else if (bots.isNotEmpty()) {
+            selectedConsoleBotId = bots[0].id
+        }
 
-                    val newBot = JSONObject().apply {
-                        put("id", newId)
-                        put("name", name)
-                        put("working_dir", workingDir)
-                        put("command", command)
-                        put("auto_restart", autoRestart)
-                        put("status", "stopped")
-                        put("pid", JSONObject.NULL)
-                        put("started_at", JSONObject.NULL)
-                        val logs = JSONArray()
-                        logs.put("[${currentTimeStr()}] [SYSTEM] Бот '$name' добавлен в систему TeleHost")
-                        put("logs", logs)
-                    }
-
-                    botsArr.put(newBot)
-                    prefs.edit().putString("telehost_bots", botsArr.toString()).apply()
-
-                    val res = JSONObject().apply {
-                        put("success", true)
-                        put("id", newId)
-                    }
-                    return res.toString()
-                }
-
-                path == "/api/bots/delete" && method == "POST" -> {
-                    val bodyObj = JSONObject(if (body.isBlank()) "{}" else body)
-                    val id = bodyObj.optString("id", "")
-                    val botsArr = JSONArray(prefs.getString("telehost_bots", "[]") ?: "[]")
-                    val updated = JSONArray()
-                    for (i in 0 until botsArr.length()) {
-                        val b = botsArr.getJSONObject(i)
-                        if (b.optString("id") != id) {
-                            updated.put(b)
-                        }
-                    }
-                    prefs.edit().putString("telehost_bots", updated.toString()).apply()
-                    return JSONObject().apply { put("success", true) }.toString()
-                }
-
-                path == "/api/bots/start" && method == "POST" -> {
-                    val bodyObj = JSONObject(if (body.isBlank()) "{}" else body)
-                    val id = bodyObj.optString("id", "")
-                    val botsArr = JSONArray(prefs.getString("telehost_bots", "[]") ?: "[]")
-                    var found = false
-                    for (i in 0 until botsArr.length()) {
-                        val b = botsArr.getJSONObject(i)
-                        if (b.optString("id") == id) {
-                            b.put("status", "running")
-                            b.put("pid", (1000..9999).random())
-                            b.put("started_at", currentTimeStr())
-                            val logs = b.optJSONArray("logs") ?: JSONArray()
-                            logs.put("[${currentTimeStr()}] [SYSTEM] Запуск процесса бота...")
-                            logs.put("[${currentTimeStr()}] [STDOUT] Подключение к Telegram Bot API...")
-                            logs.put("[${currentTimeStr()}] [STDOUT] TeleHost: Бот активен и слушает входящие события.")
-                            b.put("logs", logs)
-                            found = true
-                            break
-                        }
-                    }
-                    if (found) {
-                        prefs.edit().putString("telehost_bots", botsArr.toString()).apply()
-                    }
-                    return JSONObject().apply { put("success", found) }.toString()
-                }
-
-                path == "/api/bots/stop" && method == "POST" -> {
-                    val bodyObj = JSONObject(if (body.isBlank()) "{}" else body)
-                    val id = bodyObj.optString("id", "")
-                    val botsArr = JSONArray(prefs.getString("telehost_bots", "[]") ?: "[]")
-                    var found = false
-                    for (i in 0 until botsArr.length()) {
-                        val b = botsArr.getJSONObject(i)
-                        if (b.optString("id") == id) {
-                            b.put("status", "stopped")
-                            b.put("pid", JSONObject.NULL)
-                            val logs = b.optJSONArray("logs") ?: JSONArray()
-                            logs.put("[${currentTimeStr()}] [SYSTEM] Процесс бота остановлен пользователем")
-                            b.put("logs", logs)
-                            found = true
-                            break
-                        }
-                    }
-                    if (found) {
-                        prefs.edit().putString("telehost_bots", botsArr.toString()).apply()
-                    }
-                    return JSONObject().apply { put("success", found) }.toString()
-                }
-
-                path == "/api/bots/restart" && method == "POST" -> {
-                    val bodyObj = JSONObject(if (body.isBlank()) "{}" else body)
-                    val id = bodyObj.optString("id", "")
-                    val botsArr = JSONArray(prefs.getString("telehost_bots", "[]") ?: "[]")
-                    for (i in 0 until botsArr.length()) {
-                        val b = botsArr.getJSONObject(i)
-                        if (b.optString("id") == id) {
-                            b.put("status", "running")
-                            b.put("pid", (1000..9999).random())
-                            b.put("started_at", currentTimeStr())
-                            val logs = b.optJSONArray("logs") ?: JSONArray()
-                            logs.put("[${currentTimeStr()}] [SYSTEM] Перезапуск бота...")
-                            logs.put("[${currentTimeStr()}] [STDOUT] TeleHost: Бот перезапущен.")
-                            b.put("logs", logs)
-                            break
-                        }
-                    }
-                    prefs.edit().putString("telehost_bots", botsArr.toString()).apply()
-                    return JSONObject().apply { put("success", true) }.toString()
-                }
-
-                path.startsWith("/api/bots/logs") && method == "GET" -> {
-                    val queryUri = Uri.parse(path)
-                    val id = queryUri.getQueryParameter("id") ?: ""
-                    val sinceStr = queryUri.getQueryParameter("since") ?: "0"
-                    val since = sinceStr.toIntOrNull() ?: 0
-
-                    val botsArr = JSONArray(prefs.getString("telehost_bots", "[]") ?: "[]")
-                    for (i in 0 until botsArr.length()) {
-                        val b = botsArr.getJSONObject(i)
-                        if (b.optString("id") == id) {
-                            val logs = b.optJSONArray("logs") ?: JSONArray()
-                            val total = logs.length()
-                            val lines = JSONArray()
-                            for (j in since until total) {
-                                lines.put(logs.getString(j))
-                            }
-                            val res = JSONObject().apply {
-                                put("next_index", total)
-                                put("lines", lines)
-                            }
-                            return res.toString()
-                        }
-                    }
-                    return JSONObject().apply {
-                        put("next_index", 0)
-                        put("lines", JSONArray())
-                    }.toString()
-                }
-
-                path == "/api/bots/logs/clear" && method == "POST" -> {
-                    val bodyObj = JSONObject(if (body.isBlank()) "{}" else body)
-                    val id = bodyObj.optString("id", "")
-                    val botsArr = JSONArray(prefs.getString("telehost_bots", "[]") ?: "[]")
-                    for (i in 0 until botsArr.length()) {
-                        val b = botsArr.getJSONObject(i)
-                        if (b.optString("id") == id) {
-                            b.put("logs", JSONArray())
-                            break
-                        }
-                    }
-                    prefs.edit().putString("telehost_bots", botsArr.toString()).apply()
-                    return JSONObject().apply { put("success", true) }.toString()
-                }
-
-                path == "/api/pip/list" -> {
-                    val pkgs = JSONArray().apply {
-                        put(JSONObject().apply { put("name", "aiogram"); put("version", "3.15.0") })
-                        put(JSONObject().apply { put("name", "python-telegram-bot"); put("version", "21.9") })
-                        put(JSONObject().apply { put("name", "telebot"); put("version", "4.25.0") })
-                        put(JSONObject().apply { put("name", "requests"); put("version", "2.32.3") })
-                        put(JSONObject().apply { put("name", "aiohttp"); put("version", "3.11.10") })
-                        put(JSONObject().apply { put("name", "pydantic"); put("version", "2.10.3") })
-                        put(JSONObject().apply { put("name", "python-dotenv"); put("version", "1.0.1") })
-                    }
-                    return pkgs.toString()
-                }
-
-                path == "/api/pip/install" && method == "POST" -> {
-                    val bodyObj = JSONObject(if (body.isBlank()) "{}" else body)
-                    val pkg = bodyObj.optString("package", "")
-                    return JSONObject().apply {
-                        put("success", true)
-                        put("output", "Пакет '$pkg' успешно установлен в окружение TeleHost!")
-                    }.toString()
-                }
-
-                path == "/api/pip/uninstall" && method == "POST" -> {
-                    val bodyObj = JSONObject(if (body.isBlank()) "{}" else body)
-                    val pkg = bodyObj.optString("package", "")
-                    return JSONObject().apply {
-                        put("success", true)
-                        put("output", "Пакет '$pkg' удален.")
-                    }.toString()
-                }
-
-                path.startsWith("/api/editor/load") -> {
-                    val defaultCode = """
-# Telegram Business Bot Example for TeleHost
-import asyncio
-from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
-
-API_TOKEN = "ВАШ_ТОКЕН_БОТА"
-bot = Bot(token=API_TOKEN)
-dp = Dispatcher()
-
-@dp.message(Command("start"))
-async def cmd_start(message: types.Message):
-    await message.answer("👋 Привет! TeleHost успешно запустил этого бота на Android 16!")
-
-async def main():
-    print("[SYSTEM] Инициализация Telegram бота...")
-    # await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    asyncio.run(main())
-                    """.trimIndent()
-                    val res = JSONObject().apply {
-                        put("success", true)
-                        put("content", defaultCode)
-                    }
-                    return res.toString()
-                }
-
-                path == "/api/editor/save" && method == "POST" -> {
-                    return JSONObject().apply {
-                        put("success", true)
-                    }.toString()
-                }
-
-                path == "/api/console/exec" && method == "POST" -> {
-                    val bodyObj = JSONObject(if (body.isBlank()) "{}" else body)
-                    val cmd = bodyObj.optString("command", "")
-                    return JSONObject().apply {
-                        put("success", true)
-                        put("output", "TeleHost (Android ${Build.VERSION.RELEASE}): $cmd\nВыполнено успешно.")
-                    }.toString()
+        binding.spinnerConsoleBot.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (position in bots.indices) {
+                    selectedConsoleBotId = bots[position].id
+                    updateConsoleOutput()
                 }
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error handling API route $path", e)
-        }
 
-        return JSONObject().apply {
-            put("success", false)
-            put("error", "Unhandled route")
-        }.toString()
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
     }
 
-    private fun currentTimeStr(): String {
-        return SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+    private fun updateConsoleOutput() {
+        val bots = botManager.getBots()
+        val bot = bots.find { it.id == selectedConsoleBotId } ?: bots.firstOrNull()
+
+        if (bot != null) {
+            if (bot.logs.isEmpty()) {
+                binding.tvTerminalOutput.text = "[TeleHost Terminal]\nОжидание событий бота '${bot.name}'..."
+            } else {
+                binding.tvTerminalOutput.text = bot.logs.joinToString("\n")
+            }
+            binding.scrollTerminal.post {
+                binding.scrollTerminal.fullScroll(View.FOCUS_DOWN)
+            }
+        } else {
+            binding.tvTerminalOutput.text = "[TeleHost Terminal]\nНет сконфигурированных ботов."
+        }
     }
 
-    class TeleHostBridge(private val activity: MainActivity) {
-        @JavascriptInterface
-        fun callApi(path: String, method: String, body: String): String {
-            return activity.handleApiDirect(path, method, body)
+    /* ==========================================================================
+       3. PIP PACKAGES TAB
+       ========================================================================== */
+
+    private fun initPipTab() {
+        pipAdapter = PipAdapter(pipPackages) { pkg ->
+            if (pkg.isInstalled) {
+                pkg.isInstalled = false
+                Toast.makeText(this, "Пакет '${pkg.name}' удален", Toast.LENGTH_SHORT).show()
+            } else {
+                pkg.isInstalled = true
+                Toast.makeText(this, "Пакет '${pkg.name}' успешно установлен", Toast.LENGTH_SHORT).show()
+            }
+            pipAdapter.notifyDataSetChanged()
         }
 
-        @JavascriptInterface
-        fun showToast(message: String) {
-            activity.runOnUiThread {
-                Toast.makeText(activity, message, Toast.LENGTH_SHORT).show()
+        binding.rvPipPackages.layoutManager = LinearLayoutManager(this)
+        binding.rvPipPackages.adapter = pipAdapter
+
+        binding.btnPipInstall.setOnClickListener {
+            val pkgName = binding.etPipPackageName.text.toString().trim()
+            if (pkgName.isNotBlank()) {
+                installPackage(pkgName)
+                binding.etPipPackageName.text?.clear()
+            }
+        }
+
+        // Suggestions chips
+        for (i in 0 until binding.chipGroupPipSuggestions.childCount) {
+            val chip = binding.chipGroupPipSuggestions.getChildAt(i) as? com.google.android.material.chip.Chip
+            chip?.setOnClickListener {
+                installPackage(chip.text.toString())
+            }
+        }
+    }
+
+    private fun installPackage(name: String) {
+        val existing = pipPackages.find { it.name.equals(name, ignoreCase = true) }
+        if (existing != null) {
+            existing.isInstalled = true
+            Toast.makeText(this, "Пакет '$name' уже в системе и обновлен!", Toast.LENGTH_SHORT).show()
+        } else {
+            pipPackages.add(0, PipPackage(name, "1.0.0", true))
+            Toast.makeText(this, "Пакет '$name' успешно загружен через pip!", Toast.LENGTH_SHORT).show()
+        }
+        pipAdapter.notifyDataSetChanged()
+    }
+
+    /* ==========================================================================
+       4. CODE EDITOR TAB
+       ========================================================================== */
+
+    private fun initEditorTab() {
+        binding.btnEditorSave.setOnClickListener {
+            val content = binding.etCodeContent.text.toString()
+            currentEditorFile?.let { file ->
+                try {
+                    file.writeText(content)
+                    Toast.makeText(this, "Файл '${file.name}' сохранен!", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(this, "Ошибка сохранения: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private fun setupEditorFilesSpinner() {
+        val sampleDir = File(filesDir, "telegram_business_bot")
+        val files = sampleDir.listFiles()?.filter { it.isFile } ?: emptyList()
+
+        if (files.isEmpty()) {
+            binding.tvEditorCurrentPath.text = "Нет доступных файлов для редактирования"
+            binding.etCodeContent.setText("")
+            return
+        }
+
+        val names = files.map { it.name }
+        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, names)
+        binding.spinnerEditorFile.adapter = adapter
+
+        binding.spinnerEditorFile.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (position in files.indices) {
+                    val file = files[position]
+                    currentEditorFile = file
+                    binding.tvEditorCurrentPath.text = file.absolutePath
+                    try {
+                        binding.etCodeContent.setText(file.readText())
+                    } catch (e: Exception) {
+                        binding.etCodeContent.setText("// Ошибка чтения файла: ${e.message}")
+                    }
+                }
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+    }
+
+    /* ==========================================================================
+       5. SETTINGS TAB
+       ========================================================================== */
+
+    private fun initSettingsTab() {
+        binding.tvSettingsOs.text = "ОС: Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})"
+        binding.tvSettingsDevice.text = "Устройство: ${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${Build.MODEL}"
+        binding.tvSettingsArch.text = "Архитектура: ${Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"}"
+
+        binding.switchBackgroundService.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked) {
+                BotHostService.startServiceSafe(this)
+                Toast.makeText(this, "Фоновый сервис хостинга включен", Toast.LENGTH_SHORT).show()
+            } else {
+                BotHostService.stopServiceSafe(this)
+                Toast.makeText(this, "Фоновый сервис выключен", Toast.LENGTH_SHORT).show()
             }
         }
     }
