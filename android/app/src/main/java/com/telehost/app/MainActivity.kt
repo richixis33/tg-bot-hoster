@@ -399,6 +399,37 @@ class MainActivity : AppCompatActivity() {
        ========================================================================== */
 
     private fun initConsoleTab() {
+        binding.btnTermux.setOnClickListener {
+            val bot = botManager.getBots().find { it.id == selectedConsoleBotId }
+            val workDir = bot?.workingDir ?: File(filesDir, "telegram_business_bot").absolutePath
+            val cmd = botManager.resolveCommand(bot?.command ?: "python main.py", File(workDir))
+            val termuxCmd = "cd \"$workDir\" && $cmd"
+
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val clip = ClipData.newPlainText("Termux Command", termuxCmd)
+            clipboard.setPrimaryClip(clip)
+
+            val termuxIntent = packageManager.getLaunchIntentForPackage("com.termux")
+            if (termuxIntent != null) {
+                Toast.makeText(this, "Команда скопирована! Запуск Termux...", Toast.LENGTH_SHORT).show()
+                startActivity(termuxIntent)
+            } else {
+                MaterialAlertDialogBuilder(this)
+                    .setTitle("Запуск через Termux")
+                    .setMessage("Команда скопирована в буфер обмена:\n\n$termuxCmd\n\nДля запуска оригинального Python-интерпретатора установите Termux (с F-Droid или GitHub).")
+                    .setPositiveButton("Скачать Termux") { _, _ ->
+                        try {
+                            val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/termux/termux-app/releases"))
+                            startActivity(browserIntent)
+                        } catch (e: Exception) {
+                            // ignore
+                        }
+                    }
+                    .setNegativeButton("Понятно", null)
+                    .show()
+            }
+        }
+
         binding.btnClearLogs.setOnClickListener {
             selectedConsoleBotId?.let { id ->
                 botManager.clearLogs(id)

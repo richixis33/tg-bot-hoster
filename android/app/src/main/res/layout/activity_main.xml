@@ -279,6 +279,15 @@
                     android:layout_weight="1" />
 
                 <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnTermux"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Termux"
+                    android:textSize="12sp"
+                    app:icon="@drawable/ic_launch" />
+
+                <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnCopyLogs"
                     style="@style/Widget.Material3.Button.TextButton"
                     android:layout_width="wrap_content"
