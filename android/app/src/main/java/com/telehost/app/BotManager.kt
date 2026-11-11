@@ -7,19 +7,28 @@ import android.os.Looper
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.json.JSONArray
+import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.regex.Pattern
 
 class BotManager(private val context: Context) {
 
-    private val prefs: SharedPreferences = context.getSharedPreferences("telehost_prefs", Context.MODE_PRIVATE)
+    val prefs: SharedPreferences = context.getSharedPreferences("telehost_prefs", Context.MODE_PRIVATE)
     private val activeProcesses = mutableMapOf<String, Process>()
+    private val activeBotJobs = mutableMapOf<String, Job>()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val TAG = "TeleHostBotManager"
 
@@ -55,8 +64,8 @@ class BotManager(private val context: Context) {
                 autoRestart = true,
                 status = "stopped",
                 logs = mutableListOf(
-                    "[${currentTime()}] [SYSTEM] TeleHost Material 3 инициализирован на Android",
-                    "[${currentTime()}] [SYSTEM] Пример Telegram Business Bot готов к запуску"
+                    "[${currentTime()}] [SYSTEM] TeleHost Material 3 готов к запуску ботов",
+                    "[${currentTime()}] [SYSTEM] Поддерживаются .py скрипты, .bat файлы и Telegram Long Polling"
                 )
             )
             list.add(sample)
@@ -94,6 +103,60 @@ class BotManager(private val context: Context) {
         saveBots(bots)
     }
 
+    fun findPythonBinary(): String? {
+        val custom = prefs.getString("python_binary_path", "")
+        if (!custom.isNullOrBlank()) {
+            val f = File(custom)
+            if (f.exists() && f.canExecute()) return custom
+        }
+
+        val internal = File(context.filesDir, "python/bin/python3")
+        if (internal.exists() && internal.canExecute()) {
+            return internal.absolutePath
+        }
+
+        val candidates = listOf(
+            "/data/data/com.termux/files/usr/bin/python3",
+            "/data/data/com.termux/files/usr/bin/python",
+            "/data/user/0/com.termux/files/usr/bin/python3",
+            "/data/user/0/com.termux/files/usr/bin/python",
+            "/data/data/ru.iiec.pydroid3/files/aarch64-linux-android/bin/python3",
+            "/data/data/ru.iiec.pydroid3/files/arm-linux-androideabi/bin/python3",
+            "/system/bin/python3",
+            "/system/bin/python",
+            "/system/xbin/python3",
+            "/system/xbin/python"
+        )
+
+        for (path in candidates) {
+            val f = File(path)
+            if (f.exists() && f.canExecute()) {
+                return path
+            }
+        }
+        return null
+    }
+
+    fun resolveCommand(rawCmd: String, workingDir: File): String {
+        val trimmed = rawCmd.trim()
+        if (trimmed.endsWith(".bat", ignoreCase = true) || trimmed.endsWith(".cmd", ignoreCase = true)) {
+            val batFile = if (File(trimmed).isAbsolute) File(trimmed) else File(workingDir, trimmed)
+            if (batFile.exists()) {
+                val lines = batFile.readLines()
+                for (line in lines) {
+                    val clean = line.trim()
+                    if (clean.isBlank() || clean.startsWith("@") || clean.startsWith("rem", ignoreCase = true) ||
+                        clean.startsWith("echo", ignoreCase = true) || clean.startsWith("title", ignoreCase = true) ||
+                        clean.startsWith("pause", ignoreCase = true)) {
+                        continue
+                    }
+                    return clean
+                }
+            }
+        }
+        return trimmed
+    }
+
     fun startBot(botId: String) {
         val bots = getBots()
         val bot = bots.find { it.id == botId } ?: return
@@ -103,26 +166,50 @@ class BotManager(private val context: Context) {
         bot.status = "running"
         bot.pid = (1000..9999).random()
         bot.startedAt = currentTime()
-        bot.logs.add("[${currentTime()}] [SYSTEM] Запуск процесса: ${bot.command}")
+        bot.logs.add("[${currentTime()}] [SYSTEM] Запуск бота '${bot.name}' (PID: ${bot.pid})...")
         saveBots(bots)
         onBotStatusChanged?.invoke()
 
-        CoroutineScope(Dispatchers.IO).launch {
+        val workingDir = File(bot.workingDir)
+        if (!workingDir.exists()) {
+            workingDir.mkdirs()
+        }
+
+        val resolvedCmd = resolveCommand(bot.command, workingDir)
+        val pythonBinary = findPythonBinary()
+
+        if (pythonBinary != null) {
+            // Real execution with detected Python
+            executeWithSystemPython(bot, workingDir, resolvedCmd, pythonBinary)
+        } else {
+            // Built-in TeleHost Telegram Engine with Long Polling
+            executeWithInAppEngine(bot, workingDir)
+        }
+    }
+
+    private fun executeWithSystemPython(bot: BotItem, workingDir: File, command: String, pythonBinary: String) {
+        val job = CoroutineScope(Dispatchers.IO).launch {
             try {
-                val workingDir = File(bot.workingDir)
-                if (!workingDir.exists()) {
-                    workingDir.mkdirs()
+                var finalCmd = command
+                if (finalCmd.startsWith("python ") || finalCmd == "python") {
+                    finalCmd = finalCmd.replaceFirst("python", pythonBinary)
+                } else if (finalCmd.startsWith("python3 ") || finalCmd == "python3") {
+                    finalCmd = finalCmd.replaceFirst("python3", pythonBinary)
                 }
 
-                // Attempt to run via shell or direct execution
-                val processBuilder = ProcessBuilder("sh", "-c", bot.command)
-                processBuilder.directory(workingDir)
-                processBuilder.redirectErrorStream(true)
+                appendLog(bot.id, "[${currentTime()}] [SYSTEM] Движок: $pythonBinary")
+                appendLog(bot.id, "[${currentTime()}] [SYSTEM] Команда: $finalCmd")
 
-                val process = processBuilder.start()
+                val pb = ProcessBuilder("sh", "-c", finalCmd)
+                pb.directory(workingDir)
+                pb.redirectErrorStream(true)
+
+                val env = pb.environment()
+                env["PYTHONUNBUFFERED"] = "1"
+                env["PATH"] = "${File(pythonBinary).parent}:${env["PATH"] ?: ""}:/system/bin"
+
+                val process = pb.start()
                 activeProcesses[bot.id] = process
-
-                appendLog(bot.id, "[${currentTime()}] [STDOUT] Процесс запущен (PID: ${bot.pid})")
 
                 val reader = BufferedReader(InputStreamReader(process.inputStream))
                 var line: String?
@@ -140,18 +227,184 @@ class BotManager(private val context: Context) {
                     onBotStatusChanged?.invoke()
 
                     if (bot.autoRestart && exitCode != 0) {
-                        appendLog(bot.id, "[${currentTime()}] [SYSTEM] Авто-перезапуск бота через 2 сек...")
-                        mainHandler.postDelayed({ startBot(bot.id) }, 2000)
+                        appendLog(bot.id, "[${currentTime()}] [SYSTEM] Авто-перезапуск бота через 3 сек...")
+                        mainHandler.postDelayed({ startBot(bot.id) }, 3000)
                     }
                 }
             } catch (e: Exception) {
-                // If shell execution is not available or python is missing from PATH, run simulated runtime engine
-                appendLog(bot.id, "[${currentTime()}] [SYSTEM] TeleHost Engine: Фоновый процесс активен")
-                appendLog(bot.id, "[${currentTime()}] [STDOUT] Загрузка модулей: aiogram, asyncio, dotenv...")
-                appendLog(bot.id, "[${currentTime()}] [STDOUT] Подключение к серверам Telegram...")
-                appendLog(bot.id, "[${currentTime()}] [STDOUT] Бот успешно запущен и слушает входящие обновления!")
+                appendLog(bot.id, "[${currentTime()}] [ERROR] Ошибка выполнения процесса: ${e.message}")
+                mainHandler.post {
+                    bot.status = "stopped"
+                    bot.pid = null
+                    saveBots(getBots())
+                    onBotStatusChanged?.invoke()
+                }
             }
         }
+        activeBotJobs[bot.id] = job
+    }
+
+    private fun executeWithInAppEngine(bot: BotItem, workingDir: File) {
+        val job = CoroutineScope(Dispatchers.IO).launch {
+            try {
+                appendLog(bot.id, "[${currentTime()}] [SYSTEM] TeleHost In-App Engine активирован (Native Android Mode)")
+                appendLog(bot.id, "[${currentTime()}] [SYSTEM] Поиск конфигурации и токена Telegram...")
+
+                val token = extractToken(workingDir)
+
+                if (token.isNullOrBlank()) {
+                    appendLog(bot.id, "[${currentTime()}] [WARN] Токен Telegram бота не найден в .env или main.py!")
+                    appendLog(bot.id, "[${currentTime()}] [SYSTEM] Перейдите во вкладку 'Редактор' и укажите ваш токен от @BotFather в файле .env или main.py.")
+                    appendLog(bot.id, "[${currentTime()}] [SYSTEM] TeleHost Engine ожидает настройки токена...")
+
+                    // Keep bot in active waiting state so user can configure token and restart
+                    while (isActive) {
+                        delay(5000)
+                    }
+                    return@launch
+                }
+
+                appendLog(bot.id, "[${currentTime()}] [SYSTEM] Проверка токена через Telegram Bot API...")
+                val meObj = makeTelegramRequest(token, "getMe", null)
+
+                if (meObj != null && meObj.optBoolean("ok")) {
+                    val userObj = meObj.optJSONObject("result")
+                    val username = userObj?.optString("username", "UnknownBot") ?: "UnknownBot"
+                    val firstName = userObj?.optString("first_name", "Telegram Bot") ?: "Telegram Bot"
+
+                    appendLog(bot.id, "[${currentTime()}] [STDOUT] 🤖 Авторизован бот: @$username ($firstName)")
+                    appendLog(bot.id, "[${currentTime()}] [STDOUT] Long Polling запущен! Бот принимает команды /start, /help, /status...")
+
+                    var offset = 0L
+
+                    while (isActive) {
+                        try {
+                            val updatesObj = makeTelegramRequest(token, "getUpdates", "offset=$offset&timeout=25")
+                            if (updatesObj != null && updatesObj.optBoolean("ok")) {
+                                val updates = updatesObj.optJSONArray("result")
+                                if (updates != null && updates.length() > 0) {
+                                    for (i in 0 until updates.length()) {
+                                        val u = updates.getJSONObject(i)
+                                        val updateId = u.getLong("update_id")
+                                        offset = updateId + 1
+
+                                        val msg = u.optJSONObject("message")
+                                        if (msg != null) {
+                                            val text = msg.optString("text", "")
+                                            val from = msg.optJSONObject("from")
+                                            val sender = from?.optString("username", from.optString("first_name", "User")) ?: "User"
+                                            val chatId = msg.getJSONObject("chat").getLong("id")
+
+                                            appendLog(bot.id, "[${currentTime()}] [STDOUT] [@$sender] Сообщение: $text")
+
+                                            handleIncomingMessage(token, chatId, text, username)
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (pollEx: Exception) {
+                            Log.e(TAG, "Polling error", pollEx)
+                            delay(3000)
+                        }
+                    }
+                } else {
+                    val desc = meObj?.optString("description", "Неверный токен бота") ?: "Неверный токен"
+                    appendLog(bot.id, "[${currentTime()}] [ERROR] Ошибка Telegram API: $desc")
+                    appendLog(bot.id, "[${currentTime()}] [SYSTEM] Проверьте корректность API_TOKEN в файле main.py или .env")
+                }
+            } catch (e: Exception) {
+                appendLog(bot.id, "[${currentTime()}] [ERROR] Сбой TeleHost Engine: ${e.message}")
+            } finally {
+                mainHandler.post {
+                    bot.status = "stopped"
+                    bot.pid = null
+                    saveBots(getBots())
+                    onBotStatusChanged?.invoke()
+                }
+            }
+        }
+        activeBotJobs[bot.id] = job
+    }
+
+    private fun handleIncomingMessage(token: String, chatId: Long, text: String, botUsername: String) {
+        val replyText = when {
+            text.startsWith("/start") -> {
+                "👋 Привет! Telegram-бот успешно запущен и работает через мобильный хостинг *TeleHost* на Android!\n\n" +
+                "🚀 Бот активен в фоне.\n" +
+                "📱 Команды: /status, /help"
+            }
+            text.startsWith("/status") -> {
+                "🟢 *Статус TeleHost*: Бот работает стабильно!\n" +
+                "🔋 Хостинг: Мобильное устройство Android\n" +
+                "⏰ Время: ${currentTime()}"
+            }
+            text.startsWith("/help") -> {
+                "ℹ️ *Справка TeleHost*:\n" +
+                "Этот бот работает прямо с Android-устройства пользователя без сервера.\n" +
+                "Команды:\n/start — Приветствие\n/status — Проверить статус хостинга"
+            }
+            else -> {
+                "💬 Получено сообщение: \"$text\"\n_Отправлено через TeleHost Engine_"
+            }
+        }
+
+        try {
+            val encodedMsg = URLEncoder.encode(replyText, "UTF-8")
+            makeTelegramRequest(token, "sendMessage", "chat_id=$chatId&text=$encodedMsg&parse_mode=Markdown")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send message", e)
+        }
+    }
+
+    private fun makeTelegramRequest(token: String, method: String, query: String?): JSONObject? {
+        var conn: HttpURLConnection? = null
+        return try {
+            val urlStr = "https://api.telegram.org/bot$token/$method" + if (query != null) "?$query" else ""
+            val url = URL(urlStr)
+            conn = url.openConnection() as HttpURLConnection
+            conn.connectTimeout = 15000
+            conn.readTimeout = 30000
+            conn.requestMethod = "GET"
+
+            if (conn.responseCode in 200..299) {
+                val response = conn.inputStream.bufferedReader().use { it.readText() }
+                JSONObject(response)
+            } else {
+                val errorStream = conn.errorStream?.bufferedReader()?.use { it.readText() }
+                if (!errorStream.isNullOrBlank()) JSONObject(errorStream) else null
+            }
+        } catch (e: Exception) {
+            null
+        } finally {
+            conn?.disconnect()
+        }
+    }
+
+    private fun extractToken(workingDir: File): String? {
+        val tokenRegex = Pattern.compile("[0-9]{8,10}:[a-zA-Z0-9_-]{35}")
+
+        // 1. Check .env
+        val envFile = File(workingDir, ".env")
+        if (envFile.exists()) {
+            val matcher = tokenRegex.matcher(envFile.readText())
+            if (matcher.find()) return matcher.group()
+        }
+
+        // 2. Check main.py
+        val mainFile = File(workingDir, "main.py")
+        if (mainFile.exists()) {
+            val matcher = tokenRegex.matcher(mainFile.readText())
+            if (matcher.find()) return matcher.group()
+        }
+
+        // 3. Check config.py
+        val configFile = File(workingDir, "config.py")
+        if (configFile.exists()) {
+            val matcher = tokenRegex.matcher(configFile.readText())
+            if (matcher.find()) return matcher.group()
+        }
+
+        return null
     }
 
     fun stopBot(botId: String) {
@@ -159,15 +412,18 @@ class BotManager(private val context: Context) {
         val bot = bots.find { it.id == botId } ?: return
 
         try {
+            activeBotJobs[botId]?.cancel()
+            activeBotJobs.remove(botId)
+
             activeProcesses[botId]?.destroy()
             activeProcesses.remove(botId)
         } catch (e: Exception) {
-            Log.e(TAG, "Error destroying process", e)
+            Log.e(TAG, "Error stopping bot", e)
         }
 
         bot.status = "stopped"
         bot.pid = null
-        bot.logs.add("[${currentTime()}] [SYSTEM] Процесс бота остановлен")
+        bot.logs.add("[${currentTime()}] [SYSTEM] Бот '${bot.name}' остановлен пользователем")
         saveBots(bots)
         onBotStatusChanged?.invoke()
         onLogsUpdated?.invoke(botId)
@@ -206,34 +462,28 @@ class BotManager(private val context: Context) {
                 sampleDir.mkdirs()
             }
 
+            val envFile = File(sampleDir, ".env")
+            if (!envFile.exists()) {
+                envFile.writeText("# Вставьте ваш токен Telegram-бота от @BotFather:\nBOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN_HERE\n")
+            }
+
             val mainPy = File(sampleDir, "main.py")
             if (!mainPy.exists()) {
                 mainPy.writeText(
                     """
-# Telegram Business Bot Example
+# Telegram Business Bot for TeleHost
+import os
 import asyncio
-from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
 
-API_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN_HERE"
-bot = Bot(token=API_TOKEN)
-dp = Dispatcher()
+# Вставьте ваш API_TOKEN Telegram-бота от @BotFather:
+API_TOKEN = os.getenv("BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN_HERE")
 
-@dp.message(Command("start"))
-async def send_welcome(message: types.Message):
-    await message.reply("👋 Привет! TeleHost успешно запустил этого бота на мобильном устройстве!")
-
-@dp.message(Command("help"))
-async def send_help(message: types.Message):
-    await message.reply("Список команд:\n/start - Начать\n/status - Статус хостинга")
-
-async def main():
+def main():
     print("[SYSTEM] TeleHost: Инициализация Telegram Business Bot...")
-    print("[SYSTEM] Подключение к Telegram API...")
-    # await dp.start_polling(bot)
+    print(f"[SYSTEM] Токен настроен: {API_TOKEN[:10]}...")
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    main()
                     """.trimIndent()
                 )
             }

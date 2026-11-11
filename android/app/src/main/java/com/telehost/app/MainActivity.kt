@@ -373,6 +373,27 @@ class MainActivity : AppCompatActivity() {
         binding.tvSettingsDevice.text = "Устройство: ${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${Build.MODEL}"
         binding.tvSettingsArch.text = "Архитектура: ${Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"}"
 
+        val detectedPython = botManager.findPythonBinary()
+        if (detectedPython != null) {
+            binding.tvPythonStatus.text = "Обнаружен Python: $detectedPython"
+            binding.etCustomPythonPath.setText(detectedPython)
+        } else {
+            binding.tvPythonStatus.text = "Движок: Встроенный TeleHost In-App Engine (Long Polling)"
+            binding.etCustomPythonPath.hint = "Напр. /data/data/com.termux/files/usr/bin/python3"
+        }
+
+        binding.btnSavePythonPath.setOnClickListener {
+            val custom = binding.etCustomPythonPath.text.toString().trim()
+            botManager.prefs.edit().putString("python_binary_path", custom).apply()
+            Toast.makeText(this, "Путь сохранен", Toast.LENGTH_SHORT).show()
+            val newPython = botManager.findPythonBinary()
+            if (newPython != null) {
+                binding.tvPythonStatus.text = "Активен Python: $newPython"
+            } else {
+                binding.tvPythonStatus.text = "Движок: Встроенный TeleHost In-App Engine (Long Polling)"
+            }
+        }
+
         binding.switchBackgroundService.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked) {
                 BotHostService.startServiceSafe(this)
