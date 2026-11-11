@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader};
 use std::net::SocketAddr;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -96,7 +96,7 @@ fn main() {
 // HTTP Request Router & Handler
 // ============================================================================
 
-fn handle_request(mut req: Request, state: Arc<AppState>) {
+fn handle_request(req: Request, state: Arc<AppState>) {
     let url = req.url().to_string();
     let method = req.method().clone();
 

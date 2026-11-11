@@ -10,9 +10,7 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 
-class BotHostService : Service {
-
-    constructor() : super()
+class BotHostService : Service() {
 
     companion object {
         const val CHANNEL_ID = "TeleHost_Service_Channel"

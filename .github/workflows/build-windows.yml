@@ -24,13 +24,13 @@ jobs:
 
     - name: Prepare Artifact Package
       run: |
-        mkdir dist
-        cp target/release/tg-bot-hoster.exe dist/TeleHost.exe
-        cp start_telehost.bat dist/
-        cp telehost_server.py dist/
-        cp README.md dist/
-        cp -r ui dist/
-        cp -r examples dist/
+        New-Item -ItemType Directory -Force -Path dist
+        Copy-Item target/release/tg-bot-hoster.exe dist/TeleHost.exe
+        Copy-Item start_telehost.bat dist/
+        Copy-Item telehost_server.py dist/
+        Copy-Item README.md dist/
+        Copy-Item ui dist/ui -Recurse
+        Copy-Item examples dist/examples -Recurse
 
     - name: Upload Windows Executable Artifact
       uses: actions/upload-artifact@v4
