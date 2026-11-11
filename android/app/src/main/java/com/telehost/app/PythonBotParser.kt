@@ -338,7 +338,7 @@ object PythonBotParser {
             "ton" to 5.42, "gram" to 5.42, "toncoin" to 5.42,
             "sol" to 214.2, "solana" to 214.2,
             "bnb" to 625.5,
-            "usdt" to 1.0, "usd" to 1.0, "$ to 1.0",
+            "usdt" to 1.0, "usd" to 1.0, "$" to 1.0,
             "rub" to 1.0 / 98.0, "руб" to 1.0 / 98.0, "рублей" to 1.0 / 98.0,
             "azn" to 1.0 / 1.70, "манат" to 1.0 / 1.70,
             "eur" to 1.0 / 0.95, "евро" to 1.0 / 0.95,
