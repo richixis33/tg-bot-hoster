@@ -1,0 +1,14 @@
+{
+    "global_default_wallet": "UQDcsPK7qf8RZa5HoBdQ4yimXXQCsdI-9suB59TwL3rWzOZj",
+    "user_wallets": {
+        "5237644653": "stampable.t.me",
+        "5836223717": "UQDcsPK7qf8RZa5HoBdQ4yimXXQCsdI-9suB59TwL3rWzOZj"
+    },
+    "connections": {
+        "5836223717": {
+            "connection_id": "O_mocCHOmEvjIAAAGt5sxIATNb8",
+            "can_reply": true,
+            "is_enabled": true
+        }
+    }
+}

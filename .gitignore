@@ -1,0 +1,34 @@
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.env
+!.env.example
+.venv/
+venv/
+ENV/
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Android
+.gradle/
+build/
+android/.gradle/
+android/build/
+android/app/build/
+local.properties
+*.apk
+*.aab
+
+# TeleHost
+telehost_bots.json
+*.log

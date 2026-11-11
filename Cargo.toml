@@ -1,0 +1,9 @@
+[package]
+name = "tg-bot-hoster"
+version = "1.0.0"
+edition = "2021"
+authors = ["richixis33"]
+description = "Telegram Bot Hoster built with Rust and Google Material Design 3 UI"
+
+[dependencies]
+tiny_http = "0.12"

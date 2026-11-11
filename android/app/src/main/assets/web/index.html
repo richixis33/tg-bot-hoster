@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="ru" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TeleHost — Material 3 Telegram Bot Hoster</title>
+    <!-- Google Fonts: Roboto & Material Symbols Outlined -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body class="theme-violet">
+    <div class="app-layout">
+        <!-- Material 3 Navigation Rail (Desktop) -->
+        <nav class="nav-rail" id="navRail">
+            <div class="nav-rail-header">
+                <div class="app-logo">
+                    <span class="material-symbols-outlined logo-icon">smart_toy</span>
+                </div>
+                <span class="app-name">TeleHost</span>
+                <span class="app-badge">Rust M3</span>
+            </div>
+
+            <div class="nav-rail-destinations">
+                <button class="nav-item active" data-tab="dashboard">
+                    <span class="nav-indicator">
+                        <span class="material-symbols-outlined">dashboard</span>
+                    </span>
+                    <span class="nav-label">Боты</span>
+                </button>
+
+                <button class="nav-item" data-tab="console">
+                    <span class="nav-indicator">
+                        <span class="material-symbols-outlined">terminal</span>
+                    </span>
+                    <span class="nav-label">Консоль</span>
+                </button>
+
+                <button class="nav-item" data-tab="pip">
+                    <span class="nav-indicator">
+                        <span class="material-symbols-outlined">package_2</span>
+                    </span>
+                    <span class="nav-label">PIP Модули</span>
+                </button>
+
+                <button class="nav-item" data-tab="editor">
+                    <span class="nav-indicator">
+                        <span class="material-symbols-outlined">edit_document</span>
+                    </span>
+                    <span class="nav-label">Файлы</span>
+                </button>
+
+                <button class="nav-item" data-tab="settings">
+                    <span class="nav-indicator">
+                        <span class="material-symbols-outlined">settings</span>
+                    </span>
+                    <span class="nav-label">Настройки</span>
+                </button>
+            </div>
+
+            <div class="nav-rail-footer">
+                <button class="icon-button" id="themeToggleBtn" title="Сменить тему">
+                    <span class="material-symbols-outlined">palette</span>
+                </button>
+            </div>
+        </nav>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- App Header Bar -->
+            <header class="top-app-bar">
+                <div class="bar-title">
+                    <h1 id="pageTitle">Управление Telegram Ботами</h1>
+                    <span class="sub-title" id="pageSubtitle">Rust Core • Material Design 3</span>
+                </div>
+                <div class="top-bar-actions">
+                    <div class="status-pill" id="pythonStatusPill">
+                        <span class="material-symbols-outlined pill-icon">code</span>
+                        <span id="pythonVersionLabel">Python 3.x</span>
+                    </div>
+                    <div class="status-pill status-pill-active" id="runningBotsPill">
+                        <span class="pulse-dot"></span>
+                        <span id="activeBotsCountLabel">0 работают</span>
+                    </div>
+                </div>
+            </header>
+
+            <div class="content-scrollable">
+                <!-- TAB 1: DASHBOARD -->
+                <section class="tab-pane active" id="pane-dashboard">
+                    <!-- Metrics Row -->
+                    <div class="metrics-grid">
+                        <div class="md3-card metric-card">
+                            <div class="metric-icon primary">
+                                <span class="material-symbols-outlined">smart_toy</span>
+                            </div>
+                            <div class="metric-info">
+                                <span class="metric-value" id="metricTotalBots">0</span>
+                                <span class="metric-label">Всего ботов</span>
+                            </div>
+                        </div>
+
+                        <div class="md3-card metric-card">
+                            <div class="metric-icon success">
+                                <span class="material-symbols-outlined">play_circle</span>
+                            </div>
+                            <div class="metric-info">
+                                <span class="metric-value" id="metricActiveBots">0</span>
+                                <span class="metric-label">Активно запущено</span>
+                            </div>
+                        </div>
+
+                        <div class="md3-card metric-card">
+                            <div class="metric-icon tertiary">
+                                <span class="material-symbols-outlined">memory</span>
+                            </div>
+                            <div class="metric-info">
+                                <span class="metric-value" id="metricPythonRuntime">Python 3</span>
+                                <span class="metric-label">Интерпретатор</span>
+                            </div>
+                        </div>
+
+                        <div class="md3-card metric-card">
+                            <div class="metric-icon secondary">
+                                <span class="material-symbols-outlined">bolt</span>
+                            </div>
+                            <div class="metric-info">
+                                <span class="metric-value" id="metricRustCore">Rust Core</span>
+                                <span class="metric-label">Бэкенд хостинга</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Quick Actions & Search -->
+                    <div class="section-toolbar">
+                        <div class="search-box">
+                            <span class="material-symbols-outlined search-icon">search</span>
+                            <input type="text" id="botSearchInput" placeholder="Поиск бота по названию или пути...">
+                        </div>
+                        <div class="toolbar-actions">
+                            <button class="md3-button md3-button-tonal" id="refreshBotsBtn">
+                                <span class="material-symbols-outlined">refresh</span>
+                                Обновить
+                            </button>
+                            <button class="md3-button md3-button-filled" id="openAddBotModalBtn">
+                                <span class="material-symbols-outlined">add</span>
+                                Добавить бота
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Bots Grid -->
+                    <div class="bots-grid" id="botsContainer">
+                        <!-- Populated dynamically via app.js -->
+                    </div>
+                </section>
+
+                <!-- TAB 2: CONSOLE / TERMINAL -->
+                <section class="tab-pane" id="pane-console">
+                    <div class="console-card md3-card">
+                        <div class="console-header">
+                            <div class="console-selector">
+                                <span class="material-symbols-outlined">terminal</span>
+                                <label for="consoleBotSelect">Бот:</label>
+                                <select id="consoleBotSelect" class="md3-select">
+                                    <!-- Populated dynamically -->
+                                </select>
+                            </div>
+                            <div class="console-tools">
+                                <label class="md3-switch-label">
+                                    <input type="checkbox" id="autoScrollCheck" checked>
+                                    <span class="switch-text">Автопрокрутка</span>
+                                </label>
+                                <button class="md3-button md3-button-outlined" id="clearConsoleBtn">
+                                    <span class="material-symbols-outlined">backspace</span>
+                                    Очистить
+                                </button>
+                                <button class="md3-button md3-button-outlined" id="downloadLogsBtn">
+                                    <span class="material-symbols-outlined">download</span>
+                                    Скачать лог
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="terminal-view" id="terminalOutput">
+                            <div class="terminal-line system-line">[SYSTEM] Консоль TeleHost готова к выводу логов процессов...</div>
+                        </div>
+
+                        <div class="console-footer">
+                            <span class="log-status" id="consoleStatusText">Мониторинг активен (интервал 800мс)</span>
+                            <div class="quick-terminal-actions">
+                                <button class="chip chip-action" id="consoleStartBtn">
+                                    <span class="material-symbols-outlined">play_arrow</span> Запуск
+                                </button>
+                                <button class="chip chip-action" id="consoleRestartBtn">
+                                    <span class="material-symbols-outlined">refresh</span> Перезапуск
+                                </button>
+                                <button class="chip chip-action chip-danger" id="consoleStopBtn">
+                                    <span class="material-symbols-outlined">stop</span> Стоп
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- TAB 3: PIP PACKAGE MANAGER -->
+                <section class="tab-pane" id="pane-pip">
+                    <div class="pip-layout">
+                        <!-- Left: Install Actions -->
+                        <div class="pip-actions-column">
+                            <!-- Quick Install Card -->
+                            <div class="md3-card pip-card">
+                                <div class="card-header">
+                                    <span class="material-symbols-outlined header-icon">download</span>
+                                    <h3>Установить модуль (pip install)</h3>
+                                </div>
+                                <p class="card-desc">Скачивание и установка Python библиотек через pip в текущую среду.</p>
+                                <div class="input-row">
+                                    <div class="md3-text-field">
+                                        <input type="text" id="pipPackageInput" placeholder="Например: aiogram, requests, pillow">
+                                    </div>
+                                    <button class="md3-button md3-button-filled" id="pipInstallBtn">
+                                        <span class="material-symbols-outlined">add_circle</span>
+                                        Установить
+                                    </button>
+                                </div>
+                                <div class="quick-tags">
+                                    <span class="tag-label">Популярные:</span>
+                                    <button class="chip chip-suggestion" data-pkg="aiogram">aiogram</button>
+                                    <button class="chip chip-suggestion" data-pkg="aiohttp">aiohttp</button>
+                                    <button class="chip chip-suggestion" data-pkg="pillow">pillow</button>
+                                    <button class="chip chip-suggestion" data-pkg="python-dotenv">python-dotenv</button>
+                                    <button class="chip chip-suggestion" data-pkg="telethon">telethon</button>
+                                    <button class="chip chip-suggestion" data-pkg="pyrogram">pyrogram</button>
+                                </div>
+                            </div>
+
+                            <!-- Requirements.txt Installer Card -->
+                            <div class="md3-card pip-card">
+                                <div class="card-header">
+                                    <span class="material-symbols-outlined header-icon">receipt_long</span>
+                                    <h3>Установка из requirements.txt</h3>
+                                </div>
+                                <p class="card-desc">Автоматическая установка всех зависимостей бота в один клик.</p>
+                                <div class="input-row">
+                                    <select id="reqBotSelect" class="md3-select">
+                                        <!-- Populated dynamically -->
+                                    </select>
+                                    <button class="md3-button md3-button-tonal" id="pipInstallReqBtn">
+                                        <span class="material-symbols-outlined">install_desktop</span>
+                                        Установить requirements.txt
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Live Pip Log -->
+                            <div class="md3-card pip-card">
+                                <div class="card-header">
+                                    <span class="material-symbols-outlined header-icon">terminal</span>
+                                    <h3>Лог выполнения PIP</h3>
+                                </div>
+                                <div class="terminal-view mini-terminal" id="pipTerminal">
+                                    <div class="terminal-line system-line">[PIP] Готов к установке пакетов...</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Right: Installed Packages Table -->
+                        <div class="pip-list-column">
+                            <div class="md3-card pip-card full-height">
+                                <div class="card-header-between">
+                                    <div class="header-left">
+                                        <span class="material-symbols-outlined header-icon">inventory_2</span>
+                                        <h3>Установленные пакеты (<span id="installedCount">0</span>)</h3>
+                                    </div>
+                                    <div class="header-right">
+                                        <input type="text" id="pipSearchInput" class="mini-search" placeholder="Поиск пакета...">
+                                        <button class="icon-button" id="refreshPipListBtn" title="Обновить список">
+                                            <span class="material-symbols-outlined">refresh</span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="packages-table-wrapper">
+                                    <table class="md3-table" id="packagesTable">
+                                        <thead>
+                                            <tr>
+                                                <th>Имя пакета</th>
+                                                <th>Версия</th>
+                                                <th class="th-actions">Действие</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="packagesTableBody">
+                                            <tr>
+                                                <td colspan="3" class="table-loading">Загрузка списка модулей...</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- TAB 4: FILE EDITOR -->
+                <section class="tab-pane" id="pane-editor">
+                    <div class="editor-layout md3-card">
+                        <div class="editor-header">
+                            <div class="editor-selectors">
+                                <div class="selector-group">
+                                    <label>Бот:</label>
+                                    <select id="editorBotSelect" class="md3-select"></select>
+                                </div>
+                                <div class="selector-group">
+                                    <label>Файл:</label>
+                                    <select id="editorFileSelect" class="md3-select">
+                                        <option value=".env">.env (Токен и настройки)</option>
+                                        <option value="start_business_bot.bat">start_business_bot.bat</option>
+                                        <option value="main.py">main.py</option>
+                                        <option value="config.py">config.py</option>
+                                        <option value="requirements.txt">requirements.txt</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="editor-actions">
+                                <button class="md3-button md3-button-outlined" id="reloadFileBtn">
+                                    <span class="material-symbols-outlined">restart_alt</span>
+                                    Перезагрузить
+                                </button>
+                                <button class="md3-button md3-button-filled" id="saveFileBtn">
+                                    <span class="material-symbols-outlined">save</span>
+                                    Сохранить файл
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="editor-container">
+                            <div class="editor-line-numbers" id="editorLineNumbers"></div>
+                            <textarea id="editorTextarea" spellcheck="false" placeholder="Выберите файл для редактирования..."></textarea>
+                        </div>
+
+                        <div class="editor-footer">
+                            <span id="editorFilePathDisplay">Путь к файлу: -</span>
+                            <span id="editorStatusDisplay">Готов к редактированию</span>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- TAB 5: SETTINGS -->
+                <section class="tab-pane" id="pane-settings">
+                    <div class="settings-grid">
+                        <div class="md3-card settings-card">
+                            <div class="card-header">
+                                <span class="material-symbols-outlined header-icon">tune</span>
+                                <h3>Конфигурация окружения</h3>
+                            </div>
+
+                            <div class="setting-item">
+                                <div class="setting-text">
+                                    <span class="setting-title">Команда Python</span>
+                                    <span class="setting-desc">Исполняемый файл Python для запуска скриптов и pip</span>
+                                </div>
+                                <input type="text" id="settingPythonPath" class="md3-input-field" value="python">
+                            </div>
+
+                            <div class="setting-item">
+                                <div class="setting-text">
+                                    <span class="setting-title">Порт Web-сервера</span>
+                                    <span class="setting-desc">Локальный порт Rust веб-сервера</span>
+                                </div>
+                                <input type="number" id="settingPort" class="md3-input-field mini-number" value="8080">
+                            </div>
+
+                            <div class="setting-item">
+                                <div class="setting-text">
+                                    <span class="setting-title">Автоматический перезапуск</span>
+                                    <span class="setting-desc">Авто-рестарт бота при падении с ошибкой</span>
+                                </div>
+                                <label class="md3-switch">
+                                    <input type="checkbox" id="settingAutoRestart" checked>
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="md3-card settings-card">
+                            <div class="card-header">
+                                <span class="material-symbols-outlined header-icon">palette</span>
+                                <h3>Тема и Стиль Material 3</h3>
+                            </div>
+
+                            <div class="theme-picker">
+                                <span class="setting-title">Акцентная цветовая палитра:</span>
+                                <div class="palette-options">
+                                    <button class="palette-circle violet active" data-theme="theme-violet" title="Material Violet"></button>
+                                    <button class="palette-circle blue" data-theme="theme-blue" title="Ocean Blue"></button>
+                                    <button class="palette-circle emerald" data-theme="theme-emerald" title="Emerald Green"></button>
+                                    <button class="palette-circle amber" data-theme="theme-amber" title="Amber Orange"></button>
+                                    <button class="palette-circle rose" data-theme="theme-rose" title="Rose Pink"></button>
+                                </div>
+                            </div>
+
+                            <div class="setting-item" style="margin-top: 1.5rem;">
+                                <div class="setting-text">
+                                    <span class="setting-title">Темный режим (Dark Theme)</span>
+                                    <span class="setting-desc">Material 3 Dark Surfaces</span>
+                                </div>
+                                <label class="md3-switch">
+                                    <input type="checkbox" id="settingDarkMode" checked>
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="md3-card settings-card">
+                            <div class="card-header">
+                                <span class="material-symbols-outlined header-icon">info</span>
+                                <h3>О проекте TeleHost</h3>
+                            </div>
+                            <div class="about-content">
+                                <p><strong>TeleHost</strong> — это современный хостинг-менеджер Telegram ботов, написанный на <strong>Rust</strong> с интерфейсом в стиле <strong>Google Material Design 3</strong>.</p>
+                                <div class="about-badges">
+                                    <span class="chip chip-static">Rust 1.99+</span>
+                                    <span class="chip chip-static">Material 3</span>
+                                    <span class="chip chip-static">Windows .BAT / Python</span>
+                                    <span class="chip chip-static">PIP Manager</span>
+                                    <span class="chip chip-static">Android APK Ready</span>
+                                </div>
+                                <div class="about-actions" style="margin-top: 1.5rem;">
+                                    <a href="https://github.com/richixis33/tg-bot-hoster" target="_blank" class="md3-button md3-button-tonal">
+                                        <span class="material-symbols-outlined">open_in_new</span>
+                                        Репозиторий GitHub
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Floating Action Button (FAB) -->
+    <button class="md3-fab" id="mainFab" title="Добавить нового бота">
+        <span class="material-symbols-outlined">add</span>
+        <span class="fab-label">Новый бот</span>
+    </button>
+
+    <!-- Modal: Add New Bot -->
+    <div class="md3-modal-backdrop" id="addBotModal">
+        <div class="md3-modal">
+            <div class="modal-header">
+                <span class="material-symbols-outlined modal-icon">add_circle</span>
+                <h2>Добавить Telegram Бота</h2>
+                <button class="icon-button close-modal-btn" id="closeAddBotModalBtn">
+                    <span class="material-symbols-outlined">close</span>
+                </button>
+            </div>
+
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="botNameInput">Название бота:</label>
+                    <input type="text" id="botNameInput" class="md3-input-field" placeholder="Например: Crypto Business Bot">
+                </div>
+
+                <div class="form-group">
+                    <label for="botDirInput">Рабочая папка (директория проекта):</label>
+                    <input type="text" id="botDirInput" class="md3-input-field" placeholder="C:\Users\...\telegram_bot или ./examples/...">
+                    <small class="field-hint">Папка, где лежат .bat, main.py, .env и requirements.txt</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="botCommandInput">Команда запуска или файл:</label>
+                    <input type="text" id="botCommandInput" class="md3-input-field" placeholder="start_business_bot.bat или main.py">
+                    <small class="field-hint">Поддерживаются .bat файлы, скрипты Python (.py) и произвольные команды</small>
+                </div>
+
+                <div class="form-group checkbox-group">
+                    <label class="md3-switch">
+                        <input type="checkbox" id="botAutoRestartInput" checked>
+                        <span class="slider"></span>
+                    </label>
+                    <span class="checkbox-label">Автоматически перезапускать при сбое (Auto-restart)</span>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button class="md3-button md3-button-text close-modal-btn">Отмена</button>
+                <button class="md3-button md3-button-filled" id="saveNewBotBtn">
+                    <span class="material-symbols-outlined">check</span>
+                    Создать и сохранить
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Snackbar / Toast Container -->
+    <div class="snackbar-container" id="snackbarContainer"></div>
+
+    <script src="/app.js"></script>
+</body>
+</html>

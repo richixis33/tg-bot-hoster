@@ -1,0 +1,39 @@
+name: Build Windows Executable
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Rust Toolchain
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        toolchain: stable
+        target: x86_64-pc-windows-msvc
+
+    - name: Build Release Binary
+      run: cargo build --release
+
+    - name: Prepare Artifact Package
+      run: |
+        mkdir dist
+        cp target/release/tg-bot-hoster.exe dist/TeleHost.exe
+        cp start_telehost.bat dist/
+        cp telehost_server.py dist/
+        cp README.md dist/
+        cp -r ui dist/
+        cp -r examples dist/
+
+    - name: Upload Windows Executable Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: TeleHost-Windows-x64
+        path: dist/
