@@ -1,14 +1,28 @@
 package com.telehost.app
 
+import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.DocumentsContract
+import android.provider.Settings
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -26,7 +40,35 @@ class MainActivity : AppCompatActivity() {
     private lateinit var pipAdapter: PipAdapter
 
     private var selectedConsoleBotId: String? = null
+    private var selectedEditorBotId: String? = null
     private var currentEditorFile: File? = null
+    private var currentFilterMode: String = "all" // "all", "running", "stopped"
+
+    private var pendingDirEditText: com.google.android.material.textfield.TextInputEditText? = null
+    private var pendingNameEditText: com.google.android.material.textfield.TextInputEditText? = null
+    private var pendingCmdEditText: com.google.android.material.textfield.TextInputEditText? = null
+    private var pendingScanResultTextView: android.widget.TextView? = null
+
+    // Native System Folder Picker Contract
+    private val folderPickerLauncher = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            try {
+                contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            } catch (e: Exception) {
+                // Ignore if not supported
+            }
+
+            val path = resolveTreeUriToPath(uri)
+            pendingDirEditText?.setText(path)
+
+            if (!hasStoragePermission()) {
+                requestStoragePermission()
+            }
+        }
+    }
 
     private val pipPackages = mutableListOf(
         PipPackage("aiogram", "3.15.0", true),
@@ -47,7 +89,7 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // Apply insets to prevent status/navigation bar clipping
+        // Apply insets
         ViewCompat.setOnApplyWindowInsetsListener(binding.rootCoordinator) { _, insets ->
             val statusBar = insets.getInsets(WindowInsetsCompat.Type.statusBars())
             val navBar = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
@@ -65,6 +107,8 @@ class MainActivity : AppCompatActivity() {
         initSettingsTab()
         initBottomNavigation()
 
+        checkStoragePermissionState()
+
         // Event callbacks
         botManager.onBotStatusChanged = {
             runOnUiThread {
@@ -81,6 +125,88 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        checkStoragePermissionState()
+    }
+
+    /* ==========================================================================
+       STORAGE PERMISSION MANAGEMENT
+       ========================================================================== */
+
+    fun hasStoragePermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    fun requestStoragePermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+                startActivity(intent)
+            } catch (e: Exception) {
+                val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                startActivity(intent)
+            }
+        } else {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE),
+                101
+            )
+        }
+    }
+
+    private fun checkStoragePermissionState() {
+        val hasPerm = hasStoragePermission()
+        binding.cardStorageBanner.visibility = if (hasPerm) View.GONE else View.VISIBLE
+
+        if (hasPerm) {
+            binding.tvStorageStatus.text = "Статус: Доступ ко всем файлам предоставлен ✅"
+            binding.tvStorageStatus.setTextColor(ContextCompat.getColor(this, R.color.terminal_green))
+            binding.btnGrantStorageSettings.text = "Разрешение активно"
+            binding.btnGrantStorageSettings.isEnabled = false
+        } else {
+            binding.tvStorageStatus.text = "Статус: Требуется разрешение для чтения памяти телефона ⚠️"
+            binding.tvStorageStatus.setTextColor(ContextCompat.getColor(this, R.color.terminal_red))
+            binding.btnGrantStorageSettings.text = "Предоставить доступ"
+            binding.btnGrantStorageSettings.isEnabled = true
+        }
+
+        binding.btnBannerGrantStorage.setOnClickListener {
+            requestStoragePermission()
+        }
+        binding.btnGrantStorageSettings.setOnClickListener {
+            requestStoragePermission()
+        }
+    }
+
+    private fun resolveTreeUriToPath(uri: Uri): String {
+        try {
+            val docId = DocumentsContract.getTreeDocumentId(uri)
+            val parts = docId.split(":")
+            val type = parts[0]
+            val subPath = if (parts.size > 1) parts[1] else ""
+
+            return if ("primary".equals(type, ignoreCase = true)) {
+                if (subPath.isNotBlank()) "/storage/emulated/0/$subPath" else "/storage/emulated/0"
+            } else {
+                if (subPath.isNotBlank()) "/storage/$type/$subPath" else "/storage/$type"
+            }
+        } catch (e: Exception) {
+            return uri.path ?: uri.toString()
+        }
+    }
+
+    /* ==========================================================================
+       NAVIGATION
+       ========================================================================== */
+
     private fun initBottomNavigation() {
         binding.bottomNav.setOnItemSelectedListener { item ->
             when (item.itemId) {
@@ -93,9 +219,12 @@ class MainActivity : AppCompatActivity() {
                 R.id.nav_pip -> switchPane(binding.panePip)
                 R.id.nav_editor -> {
                     switchPane(binding.paneEditor)
-                    setupEditorFilesSpinner()
+                    setupEditorBotsSpinner()
                 }
-                R.id.nav_settings -> switchPane(binding.paneSettings)
+                R.id.nav_settings -> {
+                    switchPane(binding.paneSettings)
+                    checkStoragePermissionState()
+                }
             }
             true
         }
@@ -116,7 +245,7 @@ class MainActivity : AppCompatActivity() {
        ========================================================================== */
 
     private fun initBotsTab() {
-        val bots = botManager.getBots()
+        val bots = getFilteredBots()
         botAdapter = BotAdapter(
             bots = bots,
             onToggle = { bot ->
@@ -133,6 +262,7 @@ class MainActivity : AppCompatActivity() {
                 binding.bottomNav.selectedItemId = R.id.nav_console
             },
             onEdit = { bot ->
+                selectedEditorBotId = bot.id
                 binding.bottomNav.selectedItemId = R.id.nav_editor
             },
             onDelete = { bot ->
@@ -156,12 +286,34 @@ class MainActivity : AppCompatActivity() {
             showAddBotDialog()
         }
 
+        // Filter chips
+        binding.chipFilterAll.setOnClickListener {
+            currentFilterMode = "all"
+            refreshBotsData()
+        }
+        binding.chipFilterRunning.setOnClickListener {
+            currentFilterMode = "running"
+            refreshBotsData()
+        }
+        binding.chipFilterStopped.setOnClickListener {
+            currentFilterMode = "stopped"
+            refreshBotsData()
+        }
+
         updateStats()
     }
 
+    private fun getFilteredBots(): List<BotItem> {
+        val all = botManager.getBots()
+        return when (currentFilterMode) {
+            "running" -> all.filter { it.status == "running" }
+            "stopped" -> all.filter { it.status != "running" }
+            else -> all
+        }
+    }
+
     private fun refreshBotsData() {
-        val bots = botManager.getBots()
-        botAdapter.updateList(bots)
+        botAdapter.updateList(getFilteredBots())
         updateStats()
     }
 
@@ -176,8 +328,55 @@ class MainActivity : AppCompatActivity() {
 
     private fun showAddBotDialog() {
         val dialogBinding = DialogAddBotBinding.inflate(LayoutInflater.from(this))
-        val defaultDir = File(filesDir, "bots/bot_${System.currentTimeMillis() % 10000}").absolutePath
+        val defaultDir = File(filesDir, "telegram_business_bot").absolutePath
         dialogBinding.etBotDir.setText(defaultDir)
+        dialogBinding.etBotName.setText("Telegram Business Bot")
+
+        pendingDirEditText = dialogBinding.etBotDir
+        pendingNameEditText = dialogBinding.etBotName
+        pendingCmdEditText = dialogBinding.etBotCommand
+        pendingScanResultTextView = dialogBinding.tvScanResult
+
+        fun scanAndDisplay(dirPath: String) {
+            val dir = File(dirPath)
+            if (dir.exists() && dir.isDirectory) {
+                val files = botManager.scanBotFiles(dir)
+                if (files.isNotEmpty()) {
+                    val fileNames = files.map { it.name }.take(6).joinToString(", ")
+                    dialogBinding.tvScanResult.text = "🔍 Найдено файлов (${files.size}): $fileNames"
+                    dialogBinding.tvScanResult.setTextColor(ContextCompat.getColor(this, R.color.terminal_green))
+
+                    val detectedCmd = botManager.autoDetectCommand(dir)
+                    dialogBinding.etBotCommand.setText(detectedCmd)
+
+                    if (dialogBinding.etBotName.text.isNullOrBlank()) {
+                        dialogBinding.etBotName.setText(dir.name)
+                    }
+                } else {
+                    dialogBinding.tvScanResult.text = "⚠️ В папке не найдены скрипты (.py / .bat / .env)"
+                    dialogBinding.tvScanResult.setTextColor(ContextCompat.getColor(this, R.color.terminal_yellow))
+                }
+            } else {
+                dialogBinding.tvScanResult.text = "⚠️ Папка не существует или нет доступа"
+                dialogBinding.tvScanResult.setTextColor(ContextCompat.getColor(this, R.color.terminal_red))
+            }
+        }
+
+        dialogBinding.etBotDir.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                val path = s?.toString()?.trim() ?: ""
+                if (path.isNotBlank()) scanAndDisplay(path)
+            }
+            override fun afterTextChanged(s: Editable?) {}
+        })
+
+        // Initial scan of default dir
+        scanAndDisplay(defaultDir)
+
+        dialogBinding.btnBrowseFolder.setOnClickListener {
+            folderPickerLauncher.launch(null)
+        }
 
         MaterialAlertDialogBuilder(this)
             .setView(dialogBinding.root)
@@ -187,9 +386,9 @@ class MainActivity : AppCompatActivity() {
                 val cmd = dialogBinding.etBotCommand.text.toString().trim()
                 val autoRestart = dialogBinding.switchAutoRestart.isChecked
 
-                botManager.addBot(name, dir, cmd, autoRestart)
+                val newBot = botManager.addBot(name, dir, cmd, autoRestart)
                 refreshBotsData()
-                Toast.makeText(this, "Бот '$name' добавлен!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Бот '${newBot.name}' добавлен!", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Отмена", null)
             .show()
@@ -206,6 +405,14 @@ class MainActivity : AppCompatActivity() {
                 updateConsoleOutput()
                 Toast.makeText(this, "Логи очищены", Toast.LENGTH_SHORT).show()
             }
+        }
+
+        binding.btnCopyLogs.setOnClickListener {
+            val text = binding.tvTerminalOutput.text.toString()
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val clip = ClipData.newPlainText("TeleHost Logs", text)
+            clipboard.setPrimaryClip(clip)
+            Toast.makeText(this, "Логи скопированы в буфер обмена", Toast.LENGTH_SHORT).show()
         }
 
         binding.btnConsoleSend.setOnClickListener {
@@ -293,7 +500,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Suggestions chips
         for (i in 0 until binding.chipGroupPipSuggestions.childCount) {
             val chip = binding.chipGroupPipSuggestions.getChildAt(i) as? com.google.android.material.chip.Chip
             chip?.setOnClickListener {
@@ -326,25 +532,75 @@ class MainActivity : AppCompatActivity() {
                     file.writeText(content)
                     Toast.makeText(this, "Файл '${file.name}' сохранен!", Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
-                    Toast.makeText(this, "Ошибка сохранения: ${e.message}", Toast.LENGTH_SHORT).show()
+                    MaterialAlertDialogBuilder(this)
+                        .setTitle("Ошибка сохранения")
+                        .setMessage("Не удалось записать файл: ${e.message}\n\nВозможно, отсутствует разрешение на доступ к памяти телефона.")
+                        .setPositiveButton("Предоставить доступ") { _, _ -> requestStoragePermission() }
+                        .setNegativeButton("Закрыть", null)
+                        .show()
                 }
             }
         }
     }
 
-    private fun setupEditorFilesSpinner() {
-        val sampleDir = File(filesDir, "telegram_business_bot")
-        val files = sampleDir.listFiles()?.filter { it.isFile } ?: emptyList()
-
-        if (files.isEmpty()) {
-            binding.tvEditorCurrentPath.text = "Нет доступных файлов для редактирования"
+    private fun setupEditorBotsSpinner() {
+        val bots = botManager.getBots()
+        if (bots.isEmpty()) {
+            binding.tvEditorCurrentPath.text = "Нет доступных ботов"
             binding.etCodeContent.setText("")
             return
         }
 
-        val names = files.map { it.name }
-        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, names)
-        binding.spinnerEditorFile.adapter = adapter
+        val names = bots.map { it.name }
+        val botAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, names)
+        binding.spinnerEditorBot.adapter = botAdapter
+
+        if (selectedEditorBotId != null) {
+            val index = bots.indexOfFirst { it.id == selectedEditorBotId }
+            if (index != -1) binding.spinnerEditorBot.setSelection(index)
+        } else {
+            selectedEditorBotId = bots[0].id
+        }
+
+        binding.spinnerEditorBot.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (position in bots.indices) {
+                    val bot = bots[position]
+                    selectedEditorBotId = bot.id
+                    loadFilesForBot(bot)
+                }
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+    }
+
+    private fun loadFilesForBot(bot: BotItem) {
+        val workingDir = File(bot.workingDir)
+        val files = botManager.scanBotFiles(workingDir)
+
+        if (files.isEmpty()) {
+            val warningMsg = if (!hasStoragePermission()) {
+                "⚠️ Требуется доступ к файлам: папка '${workingDir.name}' недоступна."
+            } else {
+                "⚠️ В папке '${workingDir.absolutePath}' не найдено файлов для редактирования."
+            }
+            binding.tvEditorCurrentPath.text = warningMsg
+            binding.etCodeContent.setText("")
+
+            val emptyAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("Нет файлов"))
+            binding.spinnerEditorFile.adapter = emptyAdapter
+            return
+        }
+
+        // Relative paths from bot workingDir
+        val displayNames = files.map { file ->
+            val rel = file.absolutePath.removePrefix(workingDir.absolutePath).removePrefix(File.separator)
+            if (rel.isNotBlank()) rel else file.name
+        }
+
+        val fileAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, displayNames)
+        binding.spinnerEditorFile.adapter = fileAdapter
 
         binding.spinnerEditorFile.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
@@ -355,7 +611,7 @@ class MainActivity : AppCompatActivity() {
                     try {
                         binding.etCodeContent.setText(file.readText())
                     } catch (e: Exception) {
-                        binding.etCodeContent.setText("// Ошибка чтения файла: ${e.message}")
+                        binding.etCodeContent.setText("// Ошибка чтения файла: ${e.message}\n// Предоставьте разрешение на доступ к файлам в Настройках.")
                     }
                 }
             }
@@ -372,6 +628,8 @@ class MainActivity : AppCompatActivity() {
         binding.tvSettingsOs.text = "ОС: Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})"
         binding.tvSettingsDevice.text = "Устройство: ${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${Build.MODEL}"
         binding.tvSettingsArch.text = "Архитектура: ${Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"}"
+
+        checkStoragePermissionState()
 
         val detectedPython = botManager.findPythonBinary()
         if (detectedPython != null) {

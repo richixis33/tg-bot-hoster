@@ -137,21 +137,79 @@ class BotManager(private val context: Context) {
         return null
     }
 
+    fun scanBotFiles(workingDir: File): List<File> {
+        val result = mutableListOf<File>()
+        try {
+            if (!workingDir.exists() || !workingDir.isDirectory) return result
+
+            fun walk(dir: File, depth: Int) {
+                if (depth > 3) return
+                val list = dir.listFiles() ?: return
+                for (file in list) {
+                    if (file.isDirectory && !file.name.startsWith(".") && file.name != "__pycache__") {
+                        walk(file, depth + 1)
+                    } else if (file.isFile) {
+                        val name = file.name.lowercase(Locale.getDefault())
+                        if (name.endsWith(".py") || name.endsWith(".bat") || name.endsWith(".cmd") ||
+                            name.endsWith(".sh") || name.endsWith(".env") || name.endsWith(".json") ||
+                            name.endsWith(".txt") || name.endsWith(".ini") || name.endsWith(".cfg") ||
+                            name.endsWith(".yml") || name.endsWith(".yaml")) {
+                            result.add(file)
+                        }
+                    }
+                }
+            }
+
+            walk(workingDir, 0)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error scanning bot files in $workingDir", e)
+        }
+        return result.sortedWith(compareBy({ !it.name.endsWith(".bat") && !it.name.endsWith(".py") }, { it.name }))
+    }
+
+    fun autoDetectCommand(workingDir: File): String {
+        try {
+            val files = scanBotFiles(workingDir)
+
+            // 1. Look for .bat files first (e.g. start_business_bot.bat)
+            val bat = files.find { it.name.endsWith(".bat", ignoreCase = true) }
+            if (bat != null) return bat.name
+
+            // 2. Look for main.py or bot.py
+            val mainPy = files.find { it.name.equals("main.py", ignoreCase = true) }
+            if (mainPy != null) return "python main.py"
+
+            val botPy = files.find { it.name.equals("bot.py", ignoreCase = true) }
+            if (botPy != null) return "python bot.py"
+
+            // 3. Any .py file
+            val anyPy = files.find { it.name.endsWith(".py", ignoreCase = true) }
+            if (anyPy != null) return "python ${anyPy.name}"
+        } catch (e: Exception) {
+            Log.e(TAG, "Error detecting command", e)
+        }
+        return "python main.py"
+    }
+
     fun resolveCommand(rawCmd: String, workingDir: File): String {
         val trimmed = rawCmd.trim()
         if (trimmed.endsWith(".bat", ignoreCase = true) || trimmed.endsWith(".cmd", ignoreCase = true)) {
             val batFile = if (File(trimmed).isAbsolute) File(trimmed) else File(workingDir, trimmed)
-            if (batFile.exists()) {
-                val lines = batFile.readLines()
-                for (line in lines) {
-                    val clean = line.trim()
-                    if (clean.isBlank() || clean.startsWith("@") || clean.startsWith("rem", ignoreCase = true) ||
-                        clean.startsWith("echo", ignoreCase = true) || clean.startsWith("title", ignoreCase = true) ||
-                        clean.startsWith("pause", ignoreCase = true)) {
-                        continue
+            try {
+                if (batFile.exists()) {
+                    val lines = batFile.readLines()
+                    for (line in lines) {
+                        val clean = line.trim()
+                        if (clean.isBlank() || clean.startsWith("@") || clean.startsWith("rem", ignoreCase = true) ||
+                            clean.startsWith("echo", ignoreCase = true) || clean.startsWith("title", ignoreCase = true) ||
+                            clean.startsWith("pause", ignoreCase = true)) {
+                            continue
+                        }
+                        return clean
                     }
-                    return clean
                 }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error parsing .bat file $batFile", e)
             }
         }
         return trimmed
@@ -171,18 +229,20 @@ class BotManager(private val context: Context) {
         onBotStatusChanged?.invoke()
 
         val workingDir = File(bot.workingDir)
-        if (!workingDir.exists()) {
-            workingDir.mkdirs()
+        try {
+            if (!workingDir.exists()) {
+                workingDir.mkdirs()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Cannot create working dir", e)
         }
 
         val resolvedCmd = resolveCommand(bot.command, workingDir)
         val pythonBinary = findPythonBinary()
 
         if (pythonBinary != null) {
-            // Real execution with detected Python
             executeWithSystemPython(bot, workingDir, resolvedCmd, pythonBinary)
         } else {
-            // Built-in TeleHost Telegram Engine with Long Polling
             executeWithInAppEngine(bot, workingDir)
         }
     }
@@ -247,17 +307,24 @@ class BotManager(private val context: Context) {
     private fun executeWithInAppEngine(bot: BotItem, workingDir: File) {
         val job = CoroutineScope(Dispatchers.IO).launch {
             try {
-                appendLog(bot.id, "[${currentTime()}] [SYSTEM] TeleHost In-App Engine активирован (Native Android Mode)")
-                appendLog(bot.id, "[${currentTime()}] [SYSTEM] Поиск конфигурации и токена Telegram...")
+                appendLog(bot.id, "[${currentTime()}] [SYSTEM] TeleHost In-App Engine (Native Android Mode)")
+                appendLog(bot.id, "[${currentTime()}] [SYSTEM] Поиск токена в папке: ${workingDir.absolutePath}")
 
-                val token = extractToken(workingDir)
+                val tokenResult = extractToken(workingDir)
 
-                if (token.isNullOrBlank()) {
-                    appendLog(bot.id, "[${currentTime()}] [WARN] Токен Telegram бота не найден в .env или main.py!")
-                    appendLog(bot.id, "[${currentTime()}] [SYSTEM] Перейдите во вкладку 'Редактор' и укажите ваш токен от @BotFather в файле .env или main.py.")
+                if (tokenResult.error != null) {
+                    appendLog(bot.id, "[${currentTime()}] [ERROR] Сбой чтения файлов: ${tokenResult.error}")
+                    appendLog(bot.id, "[${currentTime()}] [SYSTEM] ⚠️ Если папка находится в общей памяти телефона, откройте 'Настройки' TeleHost и нажмите 'Предоставить доступ ко всем файлам'.")
+                    return@launch
+                }
+
+                val token = tokenResult.token
+
+                if (token.isNullOrBlank() || token.contains("YOUR_TELEGRAM_BOT_TOKEN")) {
+                    appendLog(bot.id, "[${currentTime()}] [WARN] Токен Telegram-бота не указан в файлах .env или main.py!")
+                    appendLog(bot.id, "[${currentTime()}] [SYSTEM] ✏️ Перейдите во вкладку 'Редактор', укажите ваш токен от @BotFather и нажмите 'Сохранить'.")
                     appendLog(bot.id, "[${currentTime()}] [SYSTEM] TeleHost Engine ожидает настройки токена...")
 
-                    // Keep bot in active waiting state so user can configure token and restart
                     while (isActive) {
                         delay(5000)
                     }
@@ -273,7 +340,7 @@ class BotManager(private val context: Context) {
                     val firstName = userObj?.optString("first_name", "Telegram Bot") ?: "Telegram Bot"
 
                     appendLog(bot.id, "[${currentTime()}] [STDOUT] 🤖 Авторизован бот: @$username ($firstName)")
-                    appendLog(bot.id, "[${currentTime()}] [STDOUT] Long Polling запущен! Бот принимает команды /start, /help, /status...")
+                    appendLog(bot.id, "[${currentTime()}] [STDOUT] Long Polling запущен! Бот онлайн и принимает сообщения.")
 
                     var offset = 0L
 
@@ -295,7 +362,7 @@ class BotManager(private val context: Context) {
                                             val sender = from?.optString("username", from.optString("first_name", "User")) ?: "User"
                                             val chatId = msg.getJSONObject("chat").getLong("id")
 
-                                            appendLog(bot.id, "[${currentTime()}] [STDOUT] [@$sender] Сообщение: $text")
+                                            appendLog(bot.id, "[${currentTime()}] [STDOUT] [@$sender]: $text")
 
                                             handleIncomingMessage(token, chatId, text, username)
                                         }
@@ -303,14 +370,14 @@ class BotManager(private val context: Context) {
                                 }
                             }
                         } catch (pollEx: Exception) {
-                            Log.e(TAG, "Polling error", pollEx)
+                            Log.e(TAG, "Polling loop error", pollEx)
                             delay(3000)
                         }
                     }
                 } else {
                     val desc = meObj?.optString("description", "Неверный токен бота") ?: "Неверный токен"
                     appendLog(bot.id, "[${currentTime()}] [ERROR] Ошибка Telegram API: $desc")
-                    appendLog(bot.id, "[${currentTime()}] [SYSTEM] Проверьте корректность API_TOKEN в файле main.py или .env")
+                    appendLog(bot.id, "[${currentTime()}] [SYSTEM] Проверьте корректность токена в файле main.py или .env")
                 }
             } catch (e: Exception) {
                 appendLog(bot.id, "[${currentTime()}] [ERROR] Сбой TeleHost Engine: ${e.message}")
@@ -329,8 +396,8 @@ class BotManager(private val context: Context) {
     private fun handleIncomingMessage(token: String, chatId: Long, text: String, botUsername: String) {
         val replyText = when {
             text.startsWith("/start") -> {
-                "👋 Привет! Telegram-бот успешно запущен и работает через мобильный хостинг *TeleHost* на Android!\n\n" +
-                "🚀 Бот активен в фоне.\n" +
+                "👋 Привет! Telegram-бот успешно запущен и работает через *TeleHost* на Android!\n\n" +
+                "🚀 Статус: Онлайн\n" +
                 "📱 Команды: /status, /help"
             }
             text.startsWith("/status") -> {
@@ -340,11 +407,11 @@ class BotManager(private val context: Context) {
             }
             text.startsWith("/help") -> {
                 "ℹ️ *Справка TeleHost*:\n" +
-                "Этот бот работает прямо с Android-устройства пользователя без сервера.\n" +
-                "Команды:\n/start — Приветствие\n/status — Проверить статус хостинга"
+                "Бот работает напрямую с Android-устройства пользователя.\n" +
+                "Команды:\n/start — Начать работу\n/status — Проверить статус"
             }
             else -> {
-                "💬 Получено сообщение: \"$text\"\n_Отправлено через TeleHost Engine_"
+                "💬 Принято: \"$text\"\n_TeleHost Engine_"
             }
         }
 
@@ -380,31 +447,33 @@ class BotManager(private val context: Context) {
         }
     }
 
-    private fun extractToken(workingDir: File): String? {
+    data class TokenResult(val token: String?, val error: String?)
+
+    private fun extractToken(workingDir: File): TokenResult {
         val tokenRegex = Pattern.compile("[0-9]{8,10}:[a-zA-Z0-9_-]{35}")
 
-        // 1. Check .env
-        val envFile = File(workingDir, ".env")
-        if (envFile.exists()) {
-            val matcher = tokenRegex.matcher(envFile.readText())
-            if (matcher.find()) return matcher.group()
+        val filesToCheck = listOf(
+            File(workingDir, ".env"),
+            File(workingDir, "main.py"),
+            File(workingDir, "bot.py"),
+            File(workingDir, "config.py")
+        )
+
+        for (file in filesToCheck) {
+            try {
+                if (file.exists() && file.isFile) {
+                    val content = file.readText()
+                    val matcher = tokenRegex.matcher(content)
+                    if (matcher.find()) {
+                        return TokenResult(matcher.group(), null)
+                    }
+                }
+            } catch (e: Exception) {
+                return TokenResult(null, "${file.name}: ${e.message}")
+            }
         }
 
-        // 2. Check main.py
-        val mainFile = File(workingDir, "main.py")
-        if (mainFile.exists()) {
-            val matcher = tokenRegex.matcher(mainFile.readText())
-            if (matcher.find()) return matcher.group()
-        }
-
-        // 3. Check config.py
-        val configFile = File(workingDir, "config.py")
-        if (configFile.exists()) {
-            val matcher = tokenRegex.matcher(configFile.readText())
-            if (matcher.find()) return matcher.group()
-        }
-
-        return null
+        return TokenResult(null, null)
     }
 
     fun stopBot(botId: String) {
@@ -423,7 +492,7 @@ class BotManager(private val context: Context) {
 
         bot.status = "stopped"
         bot.pid = null
-        bot.logs.add("[${currentTime()}] [SYSTEM] Бот '${bot.name}' остановлен пользователем")
+        bot.logs.add("[${currentTime()}] [SYSTEM] Бот '${bot.name}' остановлен")
         saveBots(bots)
         onBotStatusChanged?.invoke()
         onLogsUpdated?.invoke(botId)

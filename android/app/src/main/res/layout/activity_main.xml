@@ -115,7 +115,7 @@
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
-                <!-- Stat Card: Python -->
+                <!-- Stat Card: Python Engine -->
                 <com.google.android.material.card.MaterialCardView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
@@ -133,7 +133,7 @@
                             android:id="@+id/tvStatPython"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Python 3"
+                            android:text="TeleHost"
                             android:textSize="14sp"
                             android:textStyle="bold"
                             android:textColor="@color/terminal_blue" />
@@ -147,6 +147,89 @@
                 </com.google.android.material.card.MaterialCardView>
             </LinearLayout>
 
+            <!-- Filter Chips Row -->
+            <LinearLayout
+                android:id="@+id/layoutFilterChips"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp"
+                app:layout_constraintTop_toBottomOf="@id/statsBar">
+
+                <com.google.android.material.chip.ChipGroup
+                    android:id="@+id/chipGroupFilterBots"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    app:singleSelection="true">
+
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/chipFilterAll"
+                        style="@style/Widget.Material3.Chip.Filter"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:checked="true"
+                        android:text="Все" />
+
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/chipFilterRunning"
+                        style="@style/Widget.Material3.Chip.Filter"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="🟢 Активные" />
+
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/chipFilterStopped"
+                        style="@style/Widget.Material3.Chip.Filter"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="⚪ Остановленные" />
+                </com.google.android.material.chip.ChipGroup>
+            </LinearLayout>
+
+            <!-- Storage Permission Warning Banner (if permission missing) -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/cardStorageBanner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:layout_marginEnd="16dp"
+                android:layout_marginTop="4dp"
+                android:visibility="gone"
+                app:cardBackgroundColor="#2D1515"
+                app:cardCornerRadius="12dp"
+                app:strokeColor="@color/terminal_red"
+                app:strokeWidth="1dp"
+                app:layout_constraintTop_toBottomOf="@id/layoutFilterChips">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:padding="10dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="⚠️ Требуется доступ к файлам для чтения ботов из памяти телефона"
+                        android:textColor="@color/on_surface"
+                        android:textSize="12sp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnBannerGrantStorage"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:text="Разрешить"
+                        android:textSize="11sp" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
             <!-- RecyclerView of Bots -->
             <androidx.recyclerview.widget.RecyclerView
                 android:id="@+id/rvBots"
@@ -155,7 +238,7 @@
                 android:layout_marginTop="4dp"
                 android:clipToPadding="false"
                 android:paddingBottom="72dp"
-                app:layout_constraintTop_toBottomOf="@id/statsBar"
+                app:layout_constraintTop_toBottomOf="@id/cardStorageBanner"
                 app:layout_constraintBottom_toBottomOf="parent" />
 
             <!-- Extended Floating Action Button -->
@@ -193,8 +276,15 @@
                     android:id="@+id/spinnerConsoleBot"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:backgroundTint="@color/primary" />
+                    android:layout_weight="1" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnCopyLogs"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Копия"
+                    android:textSize="12sp" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnClearLogs"
@@ -202,6 +292,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Очистить"
+                    android:textSize="12sp"
                     app:icon="@drawable/ic_clear" />
             </LinearLayout>
 
@@ -210,8 +301,8 @@
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
                 android:layout_weight="1"
-                android:layout_marginTop="8dp"
-                android:layout_marginBottom="8dp"
+                android:layout_marginTop="6dp"
+                android:layout_marginBottom="6dp"
                 app:cardBackgroundColor="@color/terminal_bg"
                 app:cardCornerRadius="12dp"
                 app:strokeColor="@color/surface_variant"
@@ -388,7 +479,7 @@
             android:padding="12dp"
             android:visibility="gone">
 
-            <!-- File selection bar -->
+            <!-- Bot & File selection bar -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -396,10 +487,17 @@
                 android:orientation="horizontal">
 
                 <Spinner
-                    android:id="@+id/spinnerEditorFile"
+                    android:id="@+id/spinnerEditorBot"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1" />
+
+                <Spinner
+                    android:id="@+id/spinnerEditorFile"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="4dp" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnEditorSave"
@@ -411,6 +509,7 @@
                     app:icon="@drawable/ic_check" />
             </LinearLayout>
 
+            <!-- File path & Scan summary -->
             <TextView
                 android:id="@+id/tvEditorCurrentPath"
                 android:layout_width="match_parent"
@@ -418,7 +517,7 @@
                 android:layout_marginTop="4dp"
                 android:fontFamily="monospace"
                 android:singleLine="true"
-                android:text="main.py"
+                android:text="Выберите файл для редактирования"
                 android:textColor="@color/terminal_blue"
                 android:textSize="12sp" />
 
@@ -502,7 +601,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="8dp"
-                            android:text="ОС: Android 16 (Baklava API 36)"
+                            android:text="ОС: Android 16 (API 36)"
                             android:textColor="@color/on_surface"
                             android:textSize="13sp" />
 
@@ -529,9 +628,54 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="4dp"
-                            android:text="Движок: TeleHost Native Kotlin &amp; Rust Engine"
+                            android:text="Движок: TeleHost Native Kotlin Engine"
                             android:textColor="@color/terminal_green"
                             android:textSize="13sp" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- Storage Permission Card -->
+                <com.google.android.material.card.MaterialCardView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    app:cardBackgroundColor="@color/card_bg"
+                    app:cardCornerRadius="16dp"
+                    app:strokeColor="@color/surface_variant"
+                    app:strokeWidth="1dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="16dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Доступ к памяти телефона"
+                            android:textColor="@color/primary"
+                            android:textSize="16sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/tvStorageStatus"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:text="Статус: Проверка..."
+                            android:textColor="@color/on_surface"
+                            android:textSize="13sp" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnGrantStorageSettings"
+                            style="@style/Widget.Material3.Button.TonalButton"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="Предоставить доступ ко всем файлам"
+                            app:cornerRadius="10dp"
+                            app:icon="@drawable/ic_folder" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 

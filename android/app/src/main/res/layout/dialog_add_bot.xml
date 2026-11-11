@@ -20,7 +20,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="16dp"
-        android:hint="Имя бота (напр. ShopBot)">
+        android:hint="Имя бота (напр. Telegram Business Bot)">
 
         <com.google.android.material.textfield.TextInputEditText
             android:id="@+id/etBotName"
@@ -29,21 +29,52 @@
             android:inputType="text" />
     </com.google.android.material.textfield.TextInputLayout>
 
-    <com.google.android.material.textfield.TextInputLayout
-        android:id="@+id/tilBotDir"
-        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+    <!-- Working Directory with Browse Button -->
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
-        android:hint="Рабочая директория бота">
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
 
-        <com.google.android.material.textfield.TextInputEditText
-            android:id="@+id/etBotDir"
-            android:layout_width="match_parent"
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/tilBotDir"
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:fontFamily="monospace"
-            android:inputType="textUri" />
-    </com.google.android.material.textfield.TextInputLayout>
+            android:layout_weight="1"
+            android:hint="Папка бота в памяти устройства">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etBotDir"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:inputType="textUri"
+                android:textSize="12sp" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnBrowseFolder"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="56dp"
+            android:layout_marginStart="8dp"
+            android:text="Обзор"
+            app:cornerRadius="10dp"
+            app:icon="@drawable/ic_folder" />
+    </LinearLayout>
+
+    <!-- Scan result / detected files info -->
+    <TextView
+        android:id="@+id/tvScanResult"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:fontFamily="monospace"
+        android:text="Файлы не просканированы"
+        android:textColor="@color/terminal_blue"
+        android:textSize="11sp" />
 
     <com.google.android.material.textfield.TextInputLayout
         android:id="@+id/tilBotCommand"
