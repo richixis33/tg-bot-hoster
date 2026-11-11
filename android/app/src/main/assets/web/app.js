@@ -2,6 +2,32 @@
  * TeleHost — Material Design 3 Frontend Controller
  */
 
+// Hook window.fetch for TeleHost Android Bridge if running in APK
+(function() {
+    if (typeof window !== 'undefined' && window.TeleHostBridge) {
+        const originalFetch = window.fetch;
+        window.fetch = async function(url, options) {
+            if (typeof url === 'string' && url.startsWith('/api/')) {
+                try {
+                    const method = (options && options.method) ? options.method : 'GET';
+                    let bodyStr = '';
+                    if (options && options.body) {
+                        bodyStr = typeof options.body === 'string' ? options.body : JSON.stringify(options.body);
+                    }
+                    const resText = window.TeleHostBridge.callApi(url, method, bodyStr);
+                    return new Response(resText, {
+                        status: 200,
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                } catch (e) {
+                    console.error('TeleHostBridge fetch error:', e);
+                }
+            }
+            return originalFetch(url, options);
+        };
+    }
+})();
+
 const STATE = {
     bots: [],
     selectedConsoleBotId: null,
